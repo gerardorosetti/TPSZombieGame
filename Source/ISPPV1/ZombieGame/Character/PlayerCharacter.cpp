@@ -12,6 +12,9 @@
 #include "Engine/World.h"
 #include "Engine/LocalPlayer.h"
 #include "InputCoreTypes.h"
+#include "Perception/AIPerceptionStimuliSourceComponent.h"
+#include "Perception/AISense_Sight.h"
+#include "Perception/AISense_Damage.h"
 
 APlayerCharacter::APlayerCharacter()
 {
@@ -47,12 +50,26 @@ APlayerCharacter::APlayerCharacter()
 
 	// 4. Instantiate Modular Combat Component
 	CombatComponent = CreateDefaultSubobject<UCombatComponent>(TEXT("CombatComponent"));
+
+	// 5. Setup AI Perception Stimuli Source
+	StimuliSourceComponent = CreateDefaultSubobject<UAIPerceptionStimuliSourceComponent>(TEXT("StimuliSourceComponent"));
+	if (StimuliSourceComponent)
+	{
+		StimuliSourceComponent->RegisterForSense(UAISense_Sight::StaticClass());
+		StimuliSourceComponent->RegisterForSense(UAISense_Damage::StaticClass());
+		StimuliSourceComponent->bAutoRegister = true;
+	}
 }
 
 void APlayerCharacter::BeginPlay()
 {
 	Super::BeginPlay();
 	RegisterInputMappingContext();
+
+	if (StimuliSourceComponent)
+	{
+		StimuliSourceComponent->RegisterWithPerceptionSystem();
+	}
 }
 
 void APlayerCharacter::PawnClientRestart()
