@@ -10,7 +10,7 @@ class USpringArmComponent;
 class UCameraComponent;
 class UInputMappingContext;
 class UInputAction;
-class UStaticMeshComponent;
+class UCombatComponent;
 struct FInputActionValue;
 
 /**
@@ -18,9 +18,8 @@ struct FInputActionValue;
  * 
  * Specializations over ABaseCharacter:
  * - Over-the-shoulder TPS camera boom (SpringArm) & FollowCamera.
- * - Enhanced Input bindings for movement, jumping, mouse look, and shooting.
- * - Prototype weapon mesh attached to hand_r socket.
- * - Test hitscan raycast method to verify damage and headshot detection on targets in real time.
+ * - Modular combat component (UCombatComponent) managing equipped weapons and ballistics.
+ * - Enhanced Input bindings for movement, jumping, mouse look, shooting, aiming, and reloading.
  */
 UCLASS()
 class ISPPV1_API APlayerCharacter : public ABaseCharacter
@@ -51,12 +50,12 @@ protected:
 	TObjectPtr<UCameraComponent> FollowCamera;
 
 	// ----------------------------------------------------------------------------------
-	// Prototype Weapon Visual (Milestone 1)
+	// Combat Subsystem
 	// ----------------------------------------------------------------------------------
 
-	/** Prototype weapon mesh attached to the character's right hand. */
+	/** Modular combat component orchestrating equipped weapons, firing, and ADS zoom. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Combat", meta=(AllowPrivateAccess="true"))
-	TObjectPtr<UStaticMeshComponent> WeaponMesh;
+	TObjectPtr<UCombatComponent> CombatComponent;
 
 	// ----------------------------------------------------------------------------------
 	// Enhanced Input
@@ -75,9 +74,17 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Input")
 	TObjectPtr<UInputAction> JumpAction;
 
-	/** Primary fire / attack input action. */
+	/** Primary fire input action (Full-auto or semi-auto trigger). */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Input")
 	TObjectPtr<UInputAction> FireAction;
+
+	/** Reload input action. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Input")
+	TObjectPtr<UInputAction> ReloadAction;
+
+	/** Aim Down Sights (ADS) input action. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Input")
+	TObjectPtr<UInputAction> AimAction;
 
 	// ----------------------------------------------------------------------------------
 	// Input Handlers
@@ -86,20 +93,18 @@ protected:
 	void Move(const FInputActionValue& Value);
 	void Look(const FInputActionValue& Value);
 
-public:
-	/**
-	 * Performs a hitscan line trace from the camera forward.
-	 * If it strikes an actor implementing IZombieDamageableInterface, damage is applied.
-	 * Can be bound to input or called from Blueprints.
-	 */
-	UFUNCTION(BlueprintCallable, Category="Combat|Test")
-	void FireTestHitscan();
+	void StartFire();
+	void StopFire();
+	void ReloadWeapon();
+	void StartAiming();
+	void StopAiming();
 
+public:
 	// ----------------------------------------------------------------------------------
 	// Getters
 	// ----------------------------------------------------------------------------------
 
 	FORCEINLINE USpringArmComponent* GetCameraBoom() const { return CameraBoom; }
 	FORCEINLINE UCameraComponent* GetFollowCamera() const { return FollowCamera; }
-	FORCEINLINE UStaticMeshComponent* GetWeaponMesh() const { return WeaponMesh; }
+	FORCEINLINE UCombatComponent* GetCombatComponent() const { return CombatComponent; }
 };
