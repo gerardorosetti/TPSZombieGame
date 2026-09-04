@@ -33,7 +33,7 @@ float UZombieHealthComponent::ProcessDamage(const FZombieDamageData& DamageData)
 	float DamageToApply = DamageData.BaseDamage * Multiplier;
 	const float TotalInitialDamage = DamageToApply;
 
-	// 2. Shield Absorption Logic (Fortnite / CoD Armor Plate mechanic)
+	// 2. Shield Absorption Logic
 	if (CurrentShield > 0.0f)
 	{
 		const float PreviousShield = CurrentShield;

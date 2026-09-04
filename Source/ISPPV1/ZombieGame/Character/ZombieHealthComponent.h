@@ -139,7 +139,7 @@ public:
 	void AddShield(float ShieldAmount);
 
 	/**
-	 * Dynamically alters MaxHealth, useful for scaling enemy health per wave in CoD Zombies.
+	 * Dynamically alters MaxHealth, useful for scaling enemy health per wave.
 	 * @param NewMaxHealth The new upper bound.
 	 * @param bAdjustCurrentHealth If true, current health is scaled proportionally or reset to new max.
 	 */

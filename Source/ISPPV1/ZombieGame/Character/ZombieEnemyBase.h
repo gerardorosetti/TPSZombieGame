@@ -61,6 +61,52 @@ protected:
 	float CorpseLifespan = 10.0f;
 
 	// ----------------------------------------------------------------------------------
+	// Locomotion & Animation Scaling (Data-Driven from Blueprint Defaults)
+	// ----------------------------------------------------------------------------------
+
+	/** 
+	 * Base movement speed (cm/s). 
+	 * Designer baseline: Fully customizable in BP_Zombie_Nurse.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Zombie|Locomotion", meta=(ClampMin="10.0"))
+	float BaseLocomotionSpeed = 50.0f;
+
+	/** 
+	 * Base animation playback rate scale for locomotion. 
+	 * Designer baseline: Fully customizable in BP_Zombie_Nurse.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Zombie|Locomotion", meta=(ClampMin="0.1", ClampMax="5.0"))
+	float BaseAnimRateScale = 1.0f;
+
+	/** Maximum speed multiplier over base speed in high rounds. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Zombie|Locomotion", meta=(ClampMin="1.0", ClampMax="10.0"))
+	float MaxSpeedMultiplier = 4.0f;
+
+	/** Absolute hard cap for zombie movement speed in cm/s (e.g. 250 cm/s). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Zombie|Locomotion", meta=(ClampMin="50.0", ClampMax="600.0"))
+	float MaxSpeedCap = 250.0f;
+
+	/** Maximum cap for locomotion animation playback rate so animation never appears absurdly accelerated. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Zombie|Locomotion", meta=(ClampMin="1.0", ClampMax="6.0"))
+	float MaxAnimRateCap = 3.5f;
+
+	// ----------------------------------------------------------------------------------
+	// Economy & Bounty Rewards (Data-Driven Bounty System)
+	// ----------------------------------------------------------------------------------
+
+	/** Points awarded to the attacker on each verified bullet hit. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Zombie|Economy", meta=(ClampMin="0"))
+	int32 HitPointsReward = 10;
+
+	/** Points awarded to the killer on standard body elimination. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Zombie|Economy", meta=(ClampMin="0"))
+	int32 KillPointsReward = 60;
+
+	/** Points awarded to the killer on lethal headshot elimination. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Zombie|Economy", meta=(ClampMin="0"))
+	int32 HeadshotPointsReward = 100;
+
+	// ----------------------------------------------------------------------------------
 	// Animations
 	// ----------------------------------------------------------------------------------
 
@@ -111,6 +157,13 @@ public:
 	/** Returns true if the zombie is alive, not attacking, and cooldown has elapsed. */
 	UFUNCTION(BlueprintPure, Category="Zombie|Combat")
 	virtual bool CanAttack() const;
+
+	/**
+	 * Dynamically scales health, speed, and attributes based on wave number.
+	 * @param RoundNumber The active match round (1, 2, 3...).
+	 */
+	UFUNCTION(BlueprintCallable, Category="Zombie|Scaling")
+	virtual void InitializeZombieRoundStats(int32 RoundNumber);
 
 	// ----------------------------------------------------------------------------------
 	// Overrides from ABaseCharacter & IZombieDamageableInterface

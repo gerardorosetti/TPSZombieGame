@@ -201,6 +201,7 @@ void AWeaponBase::FireShot()
 
 			const float ActualDamage = IZombieDamageableInterface::Execute_TakeZombieDamage(StruckActor, DamageData);
 
+
 			UE_LOG(LogTemp, Log, TEXT("[%s] Struck %s for %f dmg (Headshot: %s) | Ammo: %d/%d"),
 				*WeaponConfig.WeaponName, *StruckActor->GetName(), ActualDamage,
 				DamageData.bIsHeadshot ? TEXT("YES") : TEXT("NO"), CurrentMagAmmo, CurrentReserveAmmo);

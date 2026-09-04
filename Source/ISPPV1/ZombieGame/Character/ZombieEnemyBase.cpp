@@ -11,6 +11,7 @@
 #include "TimerManager.h"
 #include "DrawDebugHelpers.h"
 #include "Perception/AISense_Damage.h"
+#include "ZombieGame/Core/PlayerStateBase.h"
 
 AZombieEnemyBase::AZombieEnemyBase()
 {
@@ -39,7 +40,7 @@ AZombieEnemyBase::AZombieEnemyBase()
 		MoveComp->bOrientRotationToMovement = true;
 		MoveComp->bUseControllerDesiredRotation = false;
 		MoveComp->RotationRate = FRotator(0.0f, TurnRate, 0.0f);
-		MoveComp->MaxWalkSpeed = 130.0f;       // Realistic zombie shambling pace in cm/s
+		MoveComp->MaxWalkSpeed = BaseLocomotionSpeed; // Initial pace in cm/s (configured in Blueprint)
 		MoveComp->MaxAcceleration = 800.0f;
 		MoveComp->BrakingDecelerationWalking = 1000.0f;
 	}
@@ -67,6 +68,16 @@ AZombieEnemyBase::AZombieEnemyBase()
 void AZombieEnemyBase::BeginPlay()
 {
 	Super::BeginPlay();
+
+	// Apply initial baseline anim rate scale and walk speed from Blueprint defaults
+	if (USkeletalMeshComponent* MeshComp = GetMesh())
+	{
+		MeshComp->GlobalAnimRateScale = BaseAnimRateScale;
+	}
+	if (UCharacterMovementComponent* MoveComp = GetCharacterMovement())
+	{
+		MoveComp->MaxWalkSpeed = BaseLocomotionSpeed;
+	}
 
 	// Ensure movement rotation settings are applied even if Blueprint had serialized defaults
 	bUseControllerRotationYaw = false;
@@ -104,6 +115,15 @@ float AZombieEnemyBase::TakeZombieDamage_Implementation(const FZombieDamageData&
 
 	const float ActualDamage = Super::TakeZombieDamage_Implementation(DamageData);
 
+	// Award hit points reward directly to the attacking player
+	if (ActualDamage > 0.0f && DamageData.InstigatedBy.IsValid())
+	{
+		if (APlayerStateBase* PS = DamageData.InstigatedBy->GetPlayerState<APlayerStateBase>())
+		{
+			PS->AddPoints(HitPointsReward);
+		}
+	}
+
 	// Alert AI controller immediately to the attacker (instant aggro when shot)
 	if (IsZombieAlive_Implementation())
 	{
@@ -129,7 +149,8 @@ float AZombieEnemyBase::TakeZombieDamage_Implementation(const FZombieDamageData&
 	// Play flinch / hit reaction montage if alive and not currently executing an attack swing
 	if (IsZombieAlive_Implementation() && HitReactMontage && !bIsAttacking)
 	{
-		PlayAnimMontage(HitReactMontage);
+		const float CurrentGlobalScale = (GetMesh() && GetMesh()->GlobalAnimRateScale > 0.01f) ? GetMesh()->GlobalAnimRateScale : 1.0f;
+		PlayAnimMontage(HitReactMontage, 1.0f / CurrentGlobalScale);
 	}
 
 	return ActualDamage;
@@ -140,9 +161,10 @@ void AZombieEnemyBase::HandleDeath(AActor* DeadActor, AActor* KillerActor)
 	// Base class disables capsule collision, movement, and activates ragdoll physics
 	Super::HandleDeath(DeadActor, KillerActor);
 
-	// 1. Apply lethal bullet's directional ballistic impulse directly to the struck bone
+	// Restore normal anim rate scale for ragdoll/death state
 	if (USkeletalMeshComponent* MeshComp = GetMesh())
 	{
+		MeshComp->GlobalAnimRateScale = 1.0f;
 		if (!LastDamageReceived.HitImpulse.IsNearlyZero())
 		{
 			MeshComp->AddImpulseAtLocation(
@@ -160,11 +182,117 @@ void AZombieEnemyBase::HandleDeath(AActor* DeadActor, AActor* KillerActor)
 	GetWorldTimerManager().ClearTimer(AttackCooldownTimerHandle);
 	bIsAttacking = false;
 
-	// 4. Notify observers (Wave manager, sound, score subsystems)
+	// 4. Award points to the killer (standard: +100 for headshot, +60 for body kill)
+	AController* KillerController = LastDamageReceived.InstigatedBy.IsValid() ? LastDamageReceived.InstigatedBy.Get() : nullptr;
+	if (!KillerController && KillerActor)
+	{
+		if (APawn* KillerPawn = Cast<APawn>(KillerActor))
+		{
+			KillerController = KillerPawn->GetController();
+		}
+	}
+
+	if (KillerController)
+	{
+		if (APlayerStateBase* PS = KillerController->GetPlayerState<APlayerStateBase>())
+		{
+			if (LastDamageReceived.bIsHeadshot)
+			{
+				PS->AddPoints(HeadshotPointsReward);
+				PS->RecordKill(true);
+			}
+			else
+			{
+				PS->AddPoints(KillPointsReward);
+				PS->RecordKill(false);
+			}
+		}
+	}
+
+	// 5. Notify observers (Wave manager, sound, score subsystems)
 	OnZombieDeath.Broadcast(this);
 
-	// 5. Schedule corpse destruction to free memory
+	// 6. Schedule corpse destruction to free memory
 	SetLifeSpan(CorpseLifespan);
+}
+
+void AZombieEnemyBase::InitializeZombieRoundStats(int32 RoundNumber)
+{
+	const int32 EffectiveRound = FMath::Max(1, RoundNumber);
+
+	// 1. Health Scaling Formula
+	// Round 1 = 100 HP, increases by 100 HP per round up to Round 9 (900 HP)
+	// Round 10+ scales exponentially at 1.1x per round
+	float ScaledHealth = 100.0f;
+	if (EffectiveRound <= 9)
+	{
+		ScaledHealth = 100.0f + (EffectiveRound - 1) * 100.0f;
+	}
+	else
+	{
+		ScaledHealth = 900.0f * FMath::Pow(1.1f, static_cast<float>(EffectiveRound - 9));
+	}
+
+	if (HealthComponent)
+	{
+		HealthComponent->SetMaxHealth(ScaledHealth, true);
+	}
+
+	// 2. Locomotion Speed & Animation Scaling (Data-Driven from Blueprint Base Values)
+	UCharacterMovementComponent* MoveComp = GetCharacterMovement();
+	USkeletalMeshComponent* MeshComp = GetMesh();
+	if (MoveComp)
+	{
+		const float EffectiveBaseSpeed = FMath::Max(10.0f, BaseLocomotionSpeed);
+		const float EffectiveBaseAnimRate = FMath::Max(0.1f, BaseAnimRateScale);
+
+		// Calculate speed multiplier based on round progression
+		float SpeedMultiplier = 1.0f;
+		if (EffectiveRound <= 1)
+		{
+			SpeedMultiplier = 1.0f; // Round 1: Exact baseline from Blueprint
+		}
+		else if (EffectiveRound == 2)
+		{
+			SpeedMultiplier = 1.2f;
+		}
+		else if (EffectiveRound <= 4)
+		{
+			// Mix of baseline walkers and brisk trotters
+			SpeedMultiplier = (FMath::FRand() < 0.6f) ? 1.25f : 1.75f;
+		}
+		else if (EffectiveRound <= 7)
+		{
+			// Mix of brisk trotters and runners
+			SpeedMultiplier = (FMath::FRand() < 0.4f) ? 1.75f : 2.5f;
+		}
+		else
+		{
+			// High rounds: sprinters up to max multiplier/cap
+			SpeedMultiplier = (FMath::FRand() < 0.3f) ? 2.2f : MaxSpeedMultiplier;
+		}
+
+		// Enforce multiplier clamp and absolute speed cap
+		SpeedMultiplier = FMath::Clamp(SpeedMultiplier, 1.0f, MaxSpeedMultiplier);
+		float NewSpeed = EffectiveBaseSpeed * SpeedMultiplier;
+		if (MaxSpeedCap > 0.0f && NewSpeed > MaxSpeedCap)
+		{
+			NewSpeed = MaxSpeedCap;
+			SpeedMultiplier = NewSpeed / EffectiveBaseSpeed;
+		}
+
+		MoveComp->MaxWalkSpeed = NewSpeed;
+
+		// Proportionally scale animation playback rate from the Blueprint's BaseAnimRateScale
+		const float ProportionalAnimRate = FMath::Clamp(EffectiveBaseAnimRate * SpeedMultiplier, 0.5f, MaxAnimRateCap);
+		if (MeshComp)
+		{
+			MeshComp->GlobalAnimRateScale = ProportionalAnimRate;
+		}
+
+		UE_LOG(LogTemp, Log, TEXT("[%s] Scaled for Round %d: BaseSpeed=%0.1f -> NewSpeed=%0.1f (%0.2fx), BaseAnimRate=%0.2fx -> NewAnimRate=%0.2fx (Cap=%0.1f, MaxAnimCap=%0.1f)"),
+			*GetName(), EffectiveRound, EffectiveBaseSpeed, NewSpeed, SpeedMultiplier, EffectiveBaseAnimRate, ProportionalAnimRate, MaxSpeedCap, MaxAnimRateCap);
+	}
 }
 
 void AZombieEnemyBase::OnDeathStarted(AActor* Killer)
@@ -199,7 +327,10 @@ void AZombieEnemyBase::PerformAttack()
 	float AttackAnimDuration = 1.2f;
 	if (AttackMontage)
 	{
-		AttackAnimDuration = PlayAnimMontage(AttackMontage);
+		const float CurrentGlobalScale = (GetMesh() && GetMesh()->GlobalAnimRateScale > 0.01f) ? GetMesh()->GlobalAnimRateScale : 1.0f;
+		// Cancel global anim rate scale on the attack montage so attack swing remains standard 1.0x rate
+		const float NormalizedMontageRate = 1.0f / CurrentGlobalScale;
+		AttackAnimDuration = PlayAnimMontage(AttackMontage, NormalizedMontageRate);
 	}
 
 	// Schedule damage delivery mid-swing (e.g. 0.4s into animation)
