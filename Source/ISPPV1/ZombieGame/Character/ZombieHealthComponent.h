@@ -84,7 +84,7 @@ public:
 protected:
 	/** Current health value, clamped between 0 and MaxHealth. */
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category="Health|Runtime")
-	float CurrentHealth = 0.0f;
+	float CurrentHealth = 100.0f;
 
 	/** Current shield value, clamped between 0 and MaxShield. */
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category="Health|Runtime")

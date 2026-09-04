@@ -58,6 +58,14 @@ protected:
 	TObjectPtr<UCombatComponent> CombatComponent;
 
 	// ----------------------------------------------------------------------------------
+	// AI Perception Subsystem
+	// ----------------------------------------------------------------------------------
+
+	/** Stimuli source component registering player for AI sight and damage detection. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="AI", meta=(AllowPrivateAccess="true"))
+	TObjectPtr<class UAIPerceptionStimuliSourceComponent> StimuliSourceComponent;
+
+	// ----------------------------------------------------------------------------------
 	// Enhanced Input
 	// ----------------------------------------------------------------------------------
 
