@@ -1,20 +1,17 @@
 // Copyright (c) 2026 Academic Game Architecture. All Rights Reserved.
 
 #include "ZombieGame/Character/PlayerCharacter.h"
+#include "ZombieGame/Combat/CombatComponent.h"
 #include "GameFramework/SpringArmComponent.h"
 #include "Camera/CameraComponent.h"
-#include "Components/StaticMeshComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "InputMappingContext.h"
 #include "InputAction.h"
-#include "DrawDebugHelpers.h"
 #include "Engine/World.h"
 #include "Engine/LocalPlayer.h"
-#include "UObject/ConstructorHelpers.h"
 #include "InputCoreTypes.h"
-#include "ZombieGame/Interfaces/ZombieDamageableInterface.h"
 
 APlayerCharacter::APlayerCharacter()
 {
@@ -35,7 +32,7 @@ APlayerCharacter::APlayerCharacter()
 	// 2. Setup Camera Boom (Spring Arm) - Over-The-Shoulder Style
 	CameraBoom = CreateDefaultSubobject<USpringArmComponent>(TEXT("CameraBoom"));
 	CameraBoom->SetupAttachment(RootComponent);
-	CameraBoom->TargetArmLength = 220.0f;                       // Tighter
+	CameraBoom->TargetArmLength = 220.0f;
 	CameraBoom->SocketOffset = FVector(0.0f, 55.0f, 45.0f);     // Right shoulder offset
 	CameraBoom->TargetOffset = FVector(0.0f, 0.0f, 25.0f);      // Eye/chest level pivot
 	CameraBoom->bUsePawnControlRotation = true;                 // Rotate boom with mouse controller
@@ -48,21 +45,8 @@ APlayerCharacter::APlayerCharacter()
 	FollowCamera->bUsePawnControlRotation = false;
 	FollowCamera->FieldOfView = 85.0f;
 
-	// 4. Setup Prototype Weapon Visual (Attached to hand_r socket)
-	WeaponMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("WeaponMesh"));
-	WeaponMesh->SetupAttachment(GetMesh(), TEXT("hand_r"));
-	WeaponMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-	WeaponMesh->SetRelativeLocation(FVector(2.0f, 6.0f, -1.0f));
-	WeaponMesh->SetRelativeRotation(FRotator(0.0f, -90.0f, 0.0f));
-	WeaponMesh->SetRelativeScale3D(FVector(0.07f, 0.07f, 0.35f));
-
-	static ConstructorHelpers::FObjectFinder<UStaticMesh> MeshFinder(TEXT("/Game/LevelPrototyping/Meshes/SM_Cylinder.SM_Cylinder"));
-	if (MeshFinder.Succeeded())
-	{
-		WeaponMesh->SetStaticMesh(MeshFinder.Object);
-	}
-	// Note: Input actions and mapping contexts are configured in derived Blueprints
-	// (e.g. BP_PlayerCharacter) to ensure clean separation between C++ code and content assets.
+	// 4. Instantiate Modular Combat Component
+	CombatComponent = CreateDefaultSubobject<UCombatComponent>(TEXT("CombatComponent"));
 }
 
 void APlayerCharacter::BeginPlay()
@@ -117,12 +101,21 @@ void APlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCom
 
 		if (FireAction)
 		{
-			EnhancedInputComponent->BindAction(FireAction, ETriggerEvent::Started, this, &APlayerCharacter::FireTestHitscan);
+			EnhancedInputComponent->BindAction(FireAction, ETriggerEvent::Started, this, &APlayerCharacter::StartFire);
+			EnhancedInputComponent->BindAction(FireAction, ETriggerEvent::Completed, this, &APlayerCharacter::StopFire);
+		}
+
+		if (ReloadAction)
+		{
+			EnhancedInputComponent->BindAction(ReloadAction, ETriggerEvent::Started, this, &APlayerCharacter::ReloadWeapon);
+		}
+
+		if (AimAction)
+		{
+			EnhancedInputComponent->BindAction(AimAction, ETriggerEvent::Started, this, &APlayerCharacter::StartAiming);
+			EnhancedInputComponent->BindAction(AimAction, ETriggerEvent::Completed, this, &APlayerCharacter::StopAiming);
 		}
 	}
-
-	// Always provide a fallback direct binding for Left Mouse Button so testing never fails
-	PlayerInputComponent->BindKey(EKeys::LeftMouseButton, IE_Pressed, this, &APlayerCharacter::FireTestHitscan);
 }
 
 void APlayerCharacter::Move(const FInputActionValue& Value)
@@ -154,71 +147,60 @@ void APlayerCharacter::Look(const FInputActionValue& Value)
 	}
 }
 
-void APlayerCharacter::FireTestHitscan()
+void APlayerCharacter::StartFire()
 {
-	UWorld* World = GetWorld();
-	if (!World || !FollowCamera)
+	if (CombatComponent)
 	{
-		return;
+		CombatComponent->StartFire();
+	}
+}
+
+void APlayerCharacter::StopFire()
+{
+	if (CombatComponent)
+	{
+		CombatComponent->StopFire();
+	}
+}
+
+void APlayerCharacter::ReloadWeapon()
+{
+	if (CombatComponent)
+	{
+		CombatComponent->Reload();
+	}
+}
+
+void APlayerCharacter::StartAiming()
+{
+	// Smoothly orient character towards controller aim direction (no instant snap)
+	bUseControllerRotationYaw = false;
+	if (UCharacterMovementComponent* MoveComp = GetCharacterMovement())
+	{
+		MoveComp->bOrientRotationToMovement = false;
+		MoveComp->bUseControllerDesiredRotation = true;
+		MoveComp->RotationRate = FRotator(0.0f, 720.0f, 0.0f); // Smooth, responsive turn rate (degrees/sec)
 	}
 
-	// 1. Raycast parameters from center of camera
-	const FVector TraceStart = FollowCamera->GetComponentLocation();
-	const FVector TraceDirection = FollowCamera->GetForwardVector();
-	const FVector TraceEnd = TraceStart + (TraceDirection * 10000.0f); // 100 meters range
-
-	FCollisionQueryParams QueryParams;
-	QueryParams.AddIgnoredActor(this);
-	QueryParams.bTraceComplex = true;
-	QueryParams.bReturnPhysicalMaterial = true;
-
-	FHitResult HitResult;
-	const bool bHit = World->LineTraceSingleByChannel(HitResult, TraceStart, TraceEnd, ECC_Visibility, QueryParams);
-
-	// 2. Muzzle start location (from weapon mesh if valid, or shoulder)
-	const FVector MuzzleLoc = WeaponMesh ? WeaponMesh->GetComponentLocation() : (TraceStart + (FollowCamera->GetRightVector() * 20.0f) - FVector(0, 0, 20.0f));
-
-	// 3. Draw visual debug tracer
-	DrawDebugLine(
-		World,
-		MuzzleLoc,
-		bHit ? HitResult.ImpactPoint : TraceEnd,
-		bHit ? FColor::Red : FColor::Cyan,
-		false,
-		1.5f,
-		0,
-		1.5f
-	);
-
-	if (bHit && HitResult.GetActor())
+	if (CombatComponent)
 	{
-		AActor* HitActor = HitResult.GetActor();
+		CombatComponent->SetAiming(true);
+	}
+}
 
-		// Draw impact point
-		DrawDebugSphere(World, HitResult.ImpactPoint, 10.0f, 12, FColor::Yellow, false, 1.5f);
+void APlayerCharacter::StopAiming()
+{
+	// Return smoothly to free exploration mode (orients to movement direction)
+	bUseControllerRotationYaw = false;
+	if (UCharacterMovementComponent* MoveComp = GetCharacterMovement())
+	{
+		MoveComp->bUseControllerDesiredRotation = false;
+		MoveComp->bOrientRotationToMovement = true;
+		MoveComp->RotationRate = FRotator(0.0f, 500.0f, 0.0f);
+	}
 
-		// 4. Check for IZombieDamageableInterface via Unreal reflection
-		if (HitActor->Implements<UZombieDamageableInterface>())
-		{
-			FZombieDamageData DamageData;
-			DamageData.BaseDamage = 35.0f;
-			DamageData.HitLocation = HitResult.ImpactPoint;
-			DamageData.HitBoneName = HitResult.BoneName;
-			DamageData.HitImpulse = TraceDirection * 2500.0f;
-			DamageData.DamageCauser = this;
-			DamageData.InstigatedBy = GetController();
-
-			// Detect headshot
-			DamageData.bIsHeadshot = HitResult.BoneName.ToString().Contains(TEXT("head"), ESearchCase::IgnoreCase);
-
-			const float ActualDamage = IZombieDamageableInterface::Execute_TakeZombieDamage(HitActor, DamageData);
-
-			UE_LOG(LogTemp, Log, TEXT("[Player Hitscan] Struck %s! Applied %f damage (Headshot: %s)"),
-				*HitActor->GetName(), ActualDamage, DamageData.bIsHeadshot ? TEXT("YES") : TEXT("NO"));
-		}
-		else
-		{
-			UE_LOG(LogTemp, Verbose, TEXT("[Player Hitscan] Struck non-damageable actor: %s"), *HitActor->GetName());
-		}
+	if (CombatComponent)
+	{
+		CombatComponent->SetAiming(false);
 	}
 }
