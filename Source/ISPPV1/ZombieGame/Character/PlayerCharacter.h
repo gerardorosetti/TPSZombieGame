@@ -8,15 +8,18 @@
 
 class USpringArmComponent;
 class UCameraComponent;
+class UInputMappingContext;
 class UInputAction;
+class UStaticMeshComponent;
 struct FInputActionValue;
 
 /**
  * The player-controlled character in the Zombie Game.
  * 
  * Specializations over ABaseCharacter:
- * - TPS camera boom (SpringArm) positioned over the right shoulder.
- * - Enhanced Input bindings for fluid movement, jumping, and weapon testing.
+ * - Over-the-shoulder TPS camera boom (SpringArm) & FollowCamera.
+ * - Enhanced Input bindings for movement, jumping, mouse look, and shooting.
+ * - Prototype weapon mesh attached to hand_r socket.
  * - Test hitscan raycast method to verify damage and headshot detection on targets in real time.
  */
 UCLASS()
@@ -29,36 +32,52 @@ public:
 
 protected:
 	virtual void BeginPlay() override;
+	virtual void PawnClientRestart() override;
 	virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
+
+	/** Registers the default Input Mapping Context to the local player subsystem. */
+	void RegisterInputMappingContext();
 
 	// ----------------------------------------------------------------------------------
 	// Camera Components
 	// ----------------------------------------------------------------------------------
 
-	/** Spring arm component positioning the camera over the shoulder. */
+	/** Spring arm component positioning the camera tight over the right shoulder. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Camera", meta=(AllowPrivateAccess="true"))
-	USpringArmComponent* CameraBoom;
+	TObjectPtr<USpringArmComponent> CameraBoom;
 
-	/** Follow camera for the third person perspective. */
+	/** Follow camera for the over-the-shoulder perspective. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Camera", meta=(AllowPrivateAccess="true"))
-	UCameraComponent* FollowCamera;
+	TObjectPtr<UCameraComponent> FollowCamera;
 
 	// ----------------------------------------------------------------------------------
-	// Enhanced Input Actions
+	// Prototype Weapon Visual (Milestone 1)
 	// ----------------------------------------------------------------------------------
 
+	/** Prototype weapon mesh attached to the character's right hand. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Combat", meta=(AllowPrivateAccess="true"))
+	TObjectPtr<UStaticMeshComponent> WeaponMesh;
+
+	// ----------------------------------------------------------------------------------
+	// Enhanced Input
+	// ----------------------------------------------------------------------------------
+
+	/** Default mapping context activating mouse look, movement, and firing. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Input")
-	UInputAction* MoveAction;
+	TObjectPtr<UInputMappingContext> DefaultMappingContext;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Input")
-	UInputAction* LookAction;
+	TObjectPtr<UInputAction> MoveAction;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Input")
-	UInputAction* JumpAction;
+	TObjectPtr<UInputAction> LookAction;
 
-	/** Primary fire / test attack input action. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Input")
-	UInputAction* FireAction;
+	TObjectPtr<UInputAction> JumpAction;
+
+	/** Primary fire / attack input action. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Input")
+	TObjectPtr<UInputAction> FireAction;
 
 	// ----------------------------------------------------------------------------------
 	// Input Handlers
@@ -82,4 +101,5 @@ public:
 
 	FORCEINLINE USpringArmComponent* GetCameraBoom() const { return CameraBoom; }
 	FORCEINLINE UCameraComponent* GetFollowCamera() const { return FollowCamera; }
+	FORCEINLINE UStaticMeshComponent* GetWeaponMesh() const { return WeaponMesh; }
 };

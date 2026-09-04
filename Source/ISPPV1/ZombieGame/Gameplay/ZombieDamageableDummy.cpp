@@ -46,8 +46,8 @@ void AZombieDamageableDummy::HandleHealthChanged(float CurrentHealth, float MaxH
 	UE_LOG(LogTemp, Log, TEXT("[Dummy Target] Hit registered! Delta: %f | Current Health: %f/%f (Headshot: %s)"),
 		HealthDelta, CurrentHealth, MaxHealth, DamageData.bIsHeadshot ? TEXT("YES") : TEXT("NO"));
 
-	// Quick visual feedback: slight impulse or bounce
-	if (MeshComponent && !DamageData.HitImpulse.IsNearlyZero())
+	// Quick visual feedback: slight impulse or bounce (only if physics is actively simulated)
+	if (MeshComponent && MeshComponent->IsSimulatingPhysics() && !DamageData.HitImpulse.IsNearlyZero())
 	{
 		MeshComponent->AddImpulse(DamageData.HitImpulse * 0.5f, NAME_None, true);
 	}

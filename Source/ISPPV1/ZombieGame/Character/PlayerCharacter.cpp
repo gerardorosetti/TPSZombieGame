@@ -3,14 +3,22 @@
 #include "ZombieGame/Character/PlayerCharacter.h"
 #include "GameFramework/SpringArmComponent.h"
 #include "Camera/CameraComponent.h"
+#include "Components/StaticMeshComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "EnhancedInputComponent.h"
+#include "EnhancedInputSubsystems.h"
+#include "InputMappingContext.h"
+#include "InputAction.h"
 #include "DrawDebugHelpers.h"
 #include "Engine/World.h"
+#include "Engine/LocalPlayer.h"
+#include "UObject/ConstructorHelpers.h"
+#include "InputCoreTypes.h"
+#include "ZombieGame/Interfaces/ZombieDamageableInterface.h"
 
 APlayerCharacter::APlayerCharacter()
 {
-	// Configure character movement rotation
+	// 1. Configure character movement rotation
 	bUseControllerRotationPitch = false;
 	bUseControllerRotationYaw = false;
 	bUseControllerRotationRoll = false;
@@ -24,24 +32,64 @@ APlayerCharacter::APlayerCharacter()
 		MoveComp->MaxWalkSpeed = 500.0f;
 	}
 
-	// 1. Setup Camera Boom (Spring Arm) positioned over the right shoulder
+	// 2. Setup Camera Boom (Spring Arm) - Over-The-Shoulder Style
 	CameraBoom = CreateDefaultSubobject<USpringArmComponent>(TEXT("CameraBoom"));
 	CameraBoom->SetupAttachment(RootComponent);
-	CameraBoom->TargetArmLength = 280.0f;
-	CameraBoom->SocketOffset = FVector(0.0f, 65.0f, 65.0f); // Over-the-shoulder offset
-	CameraBoom->bUsePawnControlRotation = true;
+	CameraBoom->TargetArmLength = 220.0f;                       // Tighter
+	CameraBoom->SocketOffset = FVector(0.0f, 55.0f, 45.0f);     // Right shoulder offset
+	CameraBoom->TargetOffset = FVector(0.0f, 0.0f, 25.0f);      // Eye/chest level pivot
+	CameraBoom->bUsePawnControlRotation = true;                 // Rotate boom with mouse controller
 	CameraBoom->bEnableCameraLag = true;
-	CameraBoom->CameraLagSpeed = 12.0f;
+	CameraBoom->CameraLagSpeed = 25.0f;                         // Responsive, crisp camera motion
 
-	// 2. Setup Follow Camera
+	// 3. Setup Follow Camera
 	FollowCamera = CreateDefaultSubobject<UCameraComponent>(TEXT("FollowCamera"));
 	FollowCamera->SetupAttachment(CameraBoom, USpringArmComponent::SocketName);
 	FollowCamera->bUsePawnControlRotation = false;
+	FollowCamera->FieldOfView = 85.0f;
+
+	// 4. Setup Prototype Weapon Visual (Attached to hand_r socket)
+	WeaponMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("WeaponMesh"));
+	WeaponMesh->SetupAttachment(GetMesh(), TEXT("hand_r"));
+	WeaponMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	WeaponMesh->SetRelativeLocation(FVector(2.0f, 6.0f, -1.0f));
+	WeaponMesh->SetRelativeRotation(FRotator(0.0f, -90.0f, 0.0f));
+	WeaponMesh->SetRelativeScale3D(FVector(0.07f, 0.07f, 0.35f));
+
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> MeshFinder(TEXT("/Game/LevelPrototyping/Meshes/SM_Cylinder.SM_Cylinder"));
+	if (MeshFinder.Succeeded())
+	{
+		WeaponMesh->SetStaticMesh(MeshFinder.Object);
+	}
+	// Note: Input actions and mapping contexts are configured in derived Blueprints
+	// (e.g. BP_PlayerCharacter) to ensure clean separation between C++ code and content assets.
 }
 
 void APlayerCharacter::BeginPlay()
 {
 	Super::BeginPlay();
+	RegisterInputMappingContext();
+}
+
+void APlayerCharacter::PawnClientRestart()
+{
+	Super::PawnClientRestart();
+	RegisterInputMappingContext();
+}
+
+void APlayerCharacter::RegisterInputMappingContext()
+{
+	if (APlayerController* PC = Cast<APlayerController>(GetController()))
+	{
+		if (UEnhancedInputLocalPlayerSubsystem* Subsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(PC->GetLocalPlayer()))
+		{
+			if (DefaultMappingContext)
+			{
+				Subsystem->RemoveMappingContext(DefaultMappingContext);
+				Subsystem->AddMappingContext(DefaultMappingContext, 0);
+			}
+		}
+	}
 }
 
 void APlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
@@ -72,6 +120,9 @@ void APlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCom
 			EnhancedInputComponent->BindAction(FireAction, ETriggerEvent::Started, this, &APlayerCharacter::FireTestHitscan);
 		}
 	}
+
+	// Always provide a fallback direct binding for Left Mouse Button so testing never fails
+	PlayerInputComponent->BindKey(EKeys::LeftMouseButton, IE_Pressed, this, &APlayerCharacter::FireTestHitscan);
 }
 
 void APlayerCharacter::Move(const FInputActionValue& Value)
@@ -124,12 +175,15 @@ void APlayerCharacter::FireTestHitscan()
 	FHitResult HitResult;
 	const bool bHit = World->LineTraceSingleByChannel(HitResult, TraceStart, TraceEnd, ECC_Visibility, QueryParams);
 
-	// 2. Draw visual debug tracer
+	// 2. Muzzle start location (from weapon mesh if valid, or shoulder)
+	const FVector MuzzleLoc = WeaponMesh ? WeaponMesh->GetComponentLocation() : (TraceStart + (FollowCamera->GetRightVector() * 20.0f) - FVector(0, 0, 20.0f));
+
+	// 3. Draw visual debug tracer
 	DrawDebugLine(
 		World,
-		TraceStart + (FollowCamera->GetRightVector() * 20.0f) - FVector(0, 0, 20.0f), // approximate muzzle
+		MuzzleLoc,
 		bHit ? HitResult.ImpactPoint : TraceEnd,
-		bHit ? FColor::Red : FColor::Green,
+		bHit ? FColor::Red : FColor::Cyan,
 		false,
 		1.5f,
 		0,
@@ -143,7 +197,7 @@ void APlayerCharacter::FireTestHitscan()
 		// Draw impact point
 		DrawDebugSphere(World, HitResult.ImpactPoint, 10.0f, 12, FColor::Yellow, false, 1.5f);
 
-		// 3. Check for IZombieDamageableInterface via Unreal reflection
+		// 4. Check for IZombieDamageableInterface via Unreal reflection
 		if (HitActor->Implements<UZombieDamageableInterface>())
 		{
 			FZombieDamageData DamageData;
