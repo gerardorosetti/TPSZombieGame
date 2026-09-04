@@ -4,7 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
-#include "Zombies/Interfaces/ZombieDamageableInterface.h"
+#include "ZombieGame/Interfaces/ZombieDamageableInterface.h"
 #include "ZombieDamageableDummy.generated.h"
 
 class UZombieHealthComponent;

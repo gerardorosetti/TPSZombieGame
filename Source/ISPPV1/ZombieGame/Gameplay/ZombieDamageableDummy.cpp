@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Academic Game Architecture. All Rights Reserved.
 
-#include "Zombies/Gameplay/ZombieDamageableDummy.h"
-#include "Zombies/Character/ZombieHealthComponent.h"
+#include "ZombieGame/Gameplay/ZombieDamageableDummy.h"
+#include "ZombieGame/Character/ZombieHealthComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "UObject/ConstructorHelpers.h"
 

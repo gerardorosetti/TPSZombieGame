@@ -4,7 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
-#include "Zombies/Interfaces/ZombieDamageableInterface.h"
+#include "ZombieGame/Interfaces/ZombieDamageableInterface.h"
 #include "ZombieHealthComponent.generated.h"
 
 /**

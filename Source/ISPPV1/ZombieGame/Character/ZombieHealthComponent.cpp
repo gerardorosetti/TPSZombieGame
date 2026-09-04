@@ -1,6 +1,6 @@
 // Copyright (c) 2026 Academic Game Architecture. All Rights Reserved.
 
-#include "Zombies/Character/ZombieHealthComponent.h"
+#include "ZombieGame/Character/ZombieHealthComponent.h"
 #include "GameFramework/Actor.h"
 
 UZombieHealthComponent::UZombieHealthComponent()
