@@ -1,0 +1,44 @@
+# Visual Studio / VS Code / Rider
+.vs/
+.vscode/
+.idea/
+*.sln
+*.slnx
+*.suo
+*.user
+*.userprefs
+*.db
+*.opendb
+*.VC.db
+*.VC.opendb
+*.sln.DotSettings.user
+.vsconfig
+
+# AI Assistants & Local Editor Configs
+.gemini/
+.mcp.json
+.cursor/
+.claude/
+.agents/
+.agent/
+
+# Unreal Engine Engine-Generated Folders
+Binaries/
+DerivedDataCache/
+Intermediate/
+Saved/
+Build/
+
+# Local User-Specific Engine Configs
+Config/*UserSettings.ini
+
+# Autosaves and Backups
+Content/Autosaves/
+Saved/Autosaves/
+Content/Developers/
+Content/Collections/
+
+# OS-Specific Files
+.DS_Store
+Thumbs.db
+desktop.ini
