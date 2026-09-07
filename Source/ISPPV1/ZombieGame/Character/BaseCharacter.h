@@ -10,13 +10,7 @@
 class UZombieHealthComponent;
 
 /**
- * Common base entity for all living characters in the Zombie Game (both Player and AI Zombies).
- * 
- * Pedagogical Architecture:
- * - Demonstrates the Liskov Substitution Principle (LSP): Subclasses (Player, Zombie) can stand in
- *   anywhere an ABaseCharacter or IZombieDamageableInterface is expected.
- * - Centralizes common vital systems (HealthComponent, Ragdoll physics, damage handling) to eliminate
- *   duplicate code across Player and AI.
+ * Common base entity for living characters, centralizing health, damage handling, and death events.
  */
 UCLASS(Abstract)
 class ISPPV1_API ABaseCharacter : public ACharacter, public IZombieDamageableInterface

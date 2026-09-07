@@ -2,6 +2,8 @@
 
 #include "ZombieGame/Character/ZombieHealthComponent.h"
 #include "GameFramework/Actor.h"
+#include "TimerManager.h"
+#include "Engine/World.h"
 
 UZombieHealthComponent::UZombieHealthComponent()
 {
@@ -18,6 +20,13 @@ void UZombieHealthComponent::BeginPlay()
 	CurrentHealth = MaxHealth;
 	CurrentShield = MaxShield;
 	bIsDead = false;
+	bIsRegenerating = false;
+}
+
+void UZombieHealthComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	StopHealthRegeneration();
+	Super::EndPlay(EndPlayReason);
 }
 
 float UZombieHealthComponent::ProcessDamage(const FZombieDamageData& DamageData)
@@ -67,9 +76,15 @@ float UZombieHealthComponent::ProcessDamage(const FZombieDamageData& DamageData)
 	if (CurrentHealth <= 0.0f && !bIsDead)
 	{
 		bIsDead = true;
+		StopHealthRegeneration();
 
 		AActor* Killer = DamageData.DamageCauser.IsValid() ? DamageData.DamageCauser.Get() : nullptr;
 		OnDeath.Broadcast(GetOwner(), Killer);
+	}
+	else if (DamageToApply > 0.0f && bEnableAutoRegen)
+	{
+		// Reset auto-regeneration countdown on every non-fatal damage event
+		ResetRegenDelayTimer();
 	}
 
 	return TotalInitialDamage;
@@ -130,3 +145,90 @@ void UZombieHealthComponent::SetMaxHealth(float NewMaxHealth, bool bAdjustCurren
 	FZombieDamageData DummyData;
 	OnHealthChanged.Broadcast(CurrentHealth, MaxHealth, 0.0f, DummyData);
 }
+
+void UZombieHealthComponent::ResetRegenDelayTimer()
+{
+	if (!bEnableAutoRegen || bIsDead)
+	{
+		return;
+	}
+
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+
+	// Immediately halt any active health restoration ticks
+	bIsRegenerating = false;
+	World->GetTimerManager().ClearTimer(RegenTickTimerHandle);
+
+	// Start or reset the grace period delay before regeneration begins
+	World->GetTimerManager().SetTimer(
+		RegenDelayTimerHandle,
+		this,
+		&UZombieHealthComponent::StartHealthRegeneration,
+		RegenDelay,
+		false
+	);
+}
+
+void UZombieHealthComponent::StartHealthRegeneration()
+{
+	if (!bEnableAutoRegen || bIsDead || CurrentHealth >= MaxHealth)
+	{
+		bIsRegenerating = false;
+		return;
+	}
+
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+
+	bIsRegenerating = true;
+
+	// Start ticking smooth health recovery
+	World->GetTimerManager().SetTimer(
+		RegenTickTimerHandle,
+		this,
+		&UZombieHealthComponent::TickHealthRegeneration,
+		RegenTickInterval,
+		true
+	);
+}
+
+void UZombieHealthComponent::TickHealthRegeneration()
+{
+	if (!bEnableAutoRegen || bIsDead || CurrentHealth >= MaxHealth)
+	{
+		StopHealthRegeneration();
+		return;
+	}
+
+	const float HealthStep = RegenRate * RegenTickInterval;
+	Heal(HealthStep);
+
+	if (CurrentHealth >= MaxHealth)
+	{
+		StopHealthRegeneration();
+	}
+}
+
+void UZombieHealthComponent::StopHealthRegeneration()
+{
+	bIsRegenerating = false;
+
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(RegenDelayTimerHandle);
+		World->GetTimerManager().ClearTimer(RegenTickTimerHandle);
+	}
+}
+
+void UZombieHealthComponent::CancelHealthRegeneration()
+{
+	StopHealthRegeneration();
+}
+

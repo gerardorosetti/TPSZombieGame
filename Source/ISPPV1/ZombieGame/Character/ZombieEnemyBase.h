@@ -13,13 +13,24 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnZombieDeathDelegate, AZombieEnemy
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnZombieAttackDelegate);
 
 /**
- * Base AI-controlled enemy character class for zombies.
- * 
- * Pedagogical Architecture:
- * - Inherits vital systems (HealthComponent, IZombieDamageableInterface) from ABaseCharacter (LSP).
- * - Implements reactive ragdoll physics inheriting directional bullet impulse upon death.
- * - Manages melee attack windows, damage delivery to the player, and combat cooldowns.
- * - Broadcasts decoupled observer events for wave tracking, audio, and UI counters.
+ * Single candidate entry in the configurable power-up drop table.
+ */
+USTRUCT(BlueprintType)
+struct FPowerUpDropEntry
+{
+	GENERATED_BODY()
+
+	/** Power-up class or blueprint candidate to instantiate upon drop. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="PowerUp")
+	TSubclassOf<class APowerUpBase> PowerUpClass;
+
+	/** Relative probability weight (e.g. Max Ammo = 60.0, Insta-Kill = 40.0). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="PowerUp", meta=(ClampMin="0.0"))
+	float Weight = 1.0f;
+};
+
+/**
+ * Base AI-controlled enemy character class managing combat states, melee attacks, and ragdoll physics.
  */
 UCLASS()
 class ISPPV1_API AZombieEnemyBase : public ABaseCharacter
@@ -38,7 +49,7 @@ protected:
 
 	/** Base melee damage dealt to player on hit. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Zombie|Combat", meta=(ClampMin="1.0"))
-	float AttackDamage = 20.0f;
+	float AttackDamage = 50.0f;
 
 	/** Maximum distance in cm within which the zombie can strike the player. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Zombie|Combat", meta=(ClampMin="50.0"))
@@ -52,6 +63,10 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Zombie|Combat", meta=(ClampMin="10.0"))
 	float AttackRadius = 40.0f;
 
+	/** Fraction of attack montage duration at which melee damage connects (e.g. 0.42 = ~1.4s on 3.33s animation). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Zombie|Combat", meta=(ClampMin="0.1", ClampMax="0.9"))
+	float AttackDamageFraction = 0.42f;
+
 	/** Turn rate in degrees per second for smooth, realistic zombie rotation. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Zombie|Movement", meta=(ClampMin="30.0", ClampMax="720.0"))
 	float TurnRate = 180.0f;
@@ -59,6 +74,18 @@ protected:
 	/** Time in seconds before a dead ragdoll corpse is destroyed and cleaned from memory. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Zombie|Death", meta=(ClampMin="1.0"))
 	float CorpseLifespan = 10.0f;
+
+	// ----------------------------------------------------------------------------------
+	// Power-Up Drops (Weighted Probability Selection)
+	// ----------------------------------------------------------------------------------
+
+	/** Global probability (0.0 to 1.0) that a killed zombie drops a power-up (e.g. 0.05 = 5%). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Zombie|Drops", meta=(ClampMin="0.0", ClampMax="1.0"))
+	float PowerUpDropChance = 0.05f;
+
+	/** Configurable drop table. When PowerUpDropChance succeeds, exactly ONE power-up is chosen based on its relative weight. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Zombie|Drops")
+	TArray<FPowerUpDropEntry> PowerUpDropTable;
 
 	// ----------------------------------------------------------------------------------
 	// Locomotion & Animation Scaling (Data-Driven from Blueprint Defaults)

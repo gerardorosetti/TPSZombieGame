@@ -42,12 +42,7 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(
 );
 
 /**
- * Reusable Actor Component managing health, shield, damage absorption, and death states.
- * 
- * Pedagogical Rationale:
- * - Demonstrates the Component Pattern: Decouples health calculation from Character rendering and movement.
- * - Adheres to Single Responsibility Principle (SRP): Only handles vital statistics and damage arithmetic.
- * - Implements Observer Pattern: Emits events without knowing what systems (audio, HUD, animation) are listening.
+ * Actor Component managing health, shield, damage absorption, and death states.
  */
 UCLASS(ClassGroup=(Combat), meta=(BlueprintSpawnableComponent))
 class ISPPV1_API UZombieHealthComponent : public UActorComponent
@@ -59,6 +54,7 @@ public:
 
 protected:
 	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 public:
 	// ----------------------------------------------------------------------------------
@@ -81,6 +77,30 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Health|Debug")
 	bool bIsInvulnerable = false;
 
+	// ----------------------------------------------------------------------------------
+	// Auto-Regeneration Settings (Survival Health System)
+	// ----------------------------------------------------------------------------------
+
+	/** Enables automatic health regeneration after a damage cooldown period (used for Player). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Health|Regen")
+	bool bEnableAutoRegen = false;
+
+	/** Delay in seconds after taking damage before regeneration kicks in. Any subsequent damage resets this delay. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Health|Regen", meta=(EditCondition="bEnableAutoRegen", ClampMin="0.1"))
+	float RegenDelay = 4.0f;
+
+	/** Amount of health restored per second once regeneration begins. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Health|Regen", meta=(EditCondition="bEnableAutoRegen", ClampMin="1.0"))
+	float RegenRate = 50.0f;
+
+	/** Frequency of health restoration ticks during active regeneration. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Health|Regen", meta=(EditCondition="bEnableAutoRegen", ClampMin="0.01"))
+	float RegenTickInterval = 0.05f;
+
+	/** True if the component is currently actively regenerating health. */
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category="Health|Regen")
+	bool bIsRegenerating = false;
+
 protected:
 	/** Current health value, clamped between 0 and MaxHealth. */
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category="Health|Runtime")
@@ -93,6 +113,24 @@ protected:
 	/** Guard flag preventing multiple death triggers on subsequent hits after dying. */
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category="Health|Runtime")
 	bool bIsDead = false;
+
+	/** Timer handle for the post-damage delay before regeneration begins. */
+	FTimerHandle RegenDelayTimerHandle;
+
+	/** Timer handle for incremental health restoration ticks. */
+	FTimerHandle RegenTickTimerHandle;
+
+	/** Starts the delay timer before healing starts. Called whenever damage is taken. */
+	void ResetRegenDelayTimer();
+
+	/** Called when the delay timer elapses to initiate incremental healing ticks. */
+	void StartHealthRegeneration();
+
+	/** Incremental tick function restoring health smoothly over time. */
+	void TickHealthRegeneration();
+
+	/** Halts all regeneration timers. */
+	void StopHealthRegeneration();
 
 public:
 	// ----------------------------------------------------------------------------------
@@ -130,6 +168,12 @@ public:
 	 */
 	UFUNCTION(BlueprintCallable, Category="Health|Operations")
 	void Heal(float HealAmount);
+
+	/**
+	 * Cancels any pending or active health auto-regeneration.
+	 */
+	UFUNCTION(BlueprintCallable, Category="Health|Operations")
+	void CancelHealthRegeneration();
 
 	/**
 	 * Restores shield points up to MaxShield.

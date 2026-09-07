@@ -11,6 +11,7 @@ class USceneComponent;
 class USkeletalMeshComponent;
 class UStaticMeshComponent;
 class ACharacter;
+class ADroppedMagazine;
 
 /**
  * Firing mode of a weapon.
@@ -80,6 +81,7 @@ struct FWeaponConfig
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnWeaponAmmoChanged, int32, CurrentMag, int32, CurrentReserve);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnWeaponFired, const FHitResult&, HitResult);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnWeaponReloadStateChanged, bool, bIsReloading);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnWeaponHitTargetSignature, bool, bIsHeadshot);
 
 /**
  * Autonomous weapon actor in the modular combat architecture.
@@ -101,6 +103,7 @@ public:
 
 protected:
 	virtual void BeginPlay() override;
+	virtual void Tick(float DeltaTime) override;
 
 	// ----------------------------------------------------------------------------------
 	// Visual Components
@@ -117,6 +120,58 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Components")
 	TObjectPtr<UStaticMeshComponent> WeaponStaticMesh;
 
+	/** Static mesh for detachable magazine (supports procedural reload animation). */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Components")
+	TObjectPtr<UStaticMeshComponent> MagazineStaticMesh;
+
+	// ----------------------------------------------------------------------------------
+	// Procedural Magazine Reload Animation (Hand-Synchronized)
+	// ----------------------------------------------------------------------------------
+
+	/** If true, magazine detaches to the left hand, tosses away, and inserts a fresh mag. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Weapon|ProceduralReload")
+	bool bEnableProceduralReload = true;
+
+	/** Skeletal mesh bone/socket on the character to follow during reload (default: hand_l). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Weapon|ProceduralReload")
+	FName ReloadHandSocket = TEXT("hand_l");
+
+	/** Relative location offset when attached to reload hand. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Weapon|ProceduralReload")
+	FVector MagHandOffset = FVector(0.0f, 4.0f, -2.0f);
+
+	/** Relative rotation offset when attached to reload hand. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Weapon|ProceduralReload")
+	FRotator MagHandRotation = FRotator(0.0f, 0.0f, 90.0f);
+
+	/** Time in seconds into reload when hand grabs and detaches the empty magazine from the rifle. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Weapon|ProceduralReload", meta=(ClampMin="0.0"))
+	float ReloadDetachTime = 0.35f;
+
+	/** Time in seconds into reload when empty magazine is tossed away (hidden). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Weapon|ProceduralReload", meta=(ClampMin="0.0"))
+	float ReloadTossTime = 0.85f;
+
+	/** Time in seconds into reload when fresh magazine is grabbed from the pouch (unhidden in hand). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Weapon|ProceduralReload", meta=(ClampMin="0.0"))
+	float ReloadGrabNewTime = 1.05f;
+
+	/** Time in seconds into reload when fresh magazine is inserted into the rifle magazine well. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Weapon|ProceduralReload", meta=(ClampMin="0.0"))
+	float ReloadInsertTime = 2.05f;
+
+	/** Linear velocity impulse applied to discarded magazine upon toss (X=Forward, Y=Right, Z=Up). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Weapon|ProceduralReload")
+	FVector DroppedMagazineImpulse = FVector(0.0f, -140.0f, -60.0f);
+
+	/** Class to spawn for the discarded empty magazine with rigid-body physics. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Weapon|ProceduralReload")
+	TSubclassOf<ADroppedMagazine> DroppedMagazineClass;
+
+	FVector InitialMagLocation = FVector::ZeroVector;
+	FRotator InitialMagRotation = FRotator::ZeroRotator;
+	int32 ReloadPhase = 0;
+
 	// ----------------------------------------------------------------------------------
 	// Weapon Configuration & State
 	// ----------------------------------------------------------------------------------
@@ -127,6 +182,32 @@ protected:
 	/** Name of the socket where muzzle flash, tracers, and traces originate. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Weapon|Config")
 	FName MuzzleSocketName = TEXT("Muzzle");
+
+	/** Additional offset in cm added to the computed muzzle tip location. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Weapon|Config")
+	FVector MuzzleOffset = FVector::ZeroVector;
+
+	// ----------------------------------------------------------------------------------
+	// Aiming Alignment (ADS Offset Tuning)
+	// ----------------------------------------------------------------------------------
+
+	/** Relative location offset applied to weapon when Aiming Down Sights (ADS). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Weapon|AimAlignment")
+	FVector AimingLocationOffset = FVector::ZeroVector;
+
+	/** Relative rotation offset applied to weapon when Aiming Down Sights (ADS). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Weapon|AimAlignment")
+	FRotator AimingRotationOffset = FRotator::ZeroRotator;
+
+	/** Interp speed for transitioning weapon between hipfire and aiming transforms. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Weapon|AimAlignment", meta=(ClampMin="1.0", ClampMax="50.0"))
+	float AimInterpSpeed = 14.0f;
+
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category="Weapon|State")
+	bool bIsAiming = false;
+
+	FVector DefaultMeshLocation = FVector::ZeroVector;
+	FRotator DefaultMeshRotation = FRotator::ZeroRotator;
 
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category="Weapon|State")
 	int32 CurrentMagAmmo;
@@ -174,6 +255,9 @@ public:
 	UPROPERTY(BlueprintAssignable, Category="Weapon|Events")
 	FOnWeaponReloadStateChanged OnReloadStateChanged;
 
+	UPROPERTY(BlueprintAssignable, Category="Weapon|Events")
+	FOnWeaponHitTargetSignature OnWeaponHitTarget;
+
 	// ----------------------------------------------------------------------------------
 	// Combat Interface
 	// ----------------------------------------------------------------------------------
@@ -189,6 +273,10 @@ public:
 	/** Executes a single shot: ballistic SphereTrace, damage delivery, and visual feedback. */
 	UFUNCTION(BlueprintCallable, Category="Weapon|Combat")
 	virtual void FireShot();
+
+	/** Restores ammunition in magazine and/or reserve pools (used by Max Ammo and Wall Buys). */
+	UFUNCTION(BlueprintCallable, Category="Weapon|Combat")
+	virtual void RefillAmmo(bool bRefillMag = true, bool bRefillReserve = true);
 
 	/** Initiates reload sequence if reserve ammo is available and magazine is not full. */
 	UFUNCTION(BlueprintCallable, Category="Weapon|Combat")
@@ -229,6 +317,9 @@ public:
 	UFUNCTION(BlueprintPure, Category="Weapon|State")
 	FORCEINLINE bool IsReloading() const { return bIsReloading; }
 
+	UFUNCTION(BlueprintPure, Category="Weapon|State")
+	FORCEINLINE bool IsFiring() const { return bIsFiring; }
+
 	UFUNCTION(BlueprintPure, Category="Weapon|Config")
 	FORCEINLINE FWeaponConfig GetWeaponConfig() const { return WeaponConfig; }
 
@@ -238,4 +329,10 @@ public:
 	/** Calculates time delay between shots based on RPM. */
 	UFUNCTION(BlueprintPure, Category="Weapon|Config")
 	FORCEINLINE float GetTimeBetweenShots() const { return 60.0f / FMath::Max(WeaponConfig.FireRateRPM, 1.0f); }
+
+	UFUNCTION(BlueprintCallable, Category="Weapon|AimAlignment")
+	void SetAiming(bool bNewAiming) { bIsAiming = bNewAiming; }
+
+	UFUNCTION(BlueprintPure, Category="Weapon|AimAlignment")
+	bool IsAiming() const { return bIsAiming; }
 };

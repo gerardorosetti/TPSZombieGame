@@ -11,15 +11,10 @@
  * Parameters: New total points, Delta points (positive on gain, negative on spend).
  */
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnPointsChangedSignature, int32, NewPoints, int32, DeltaPoints);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnDoublePointsStateChangedSignature, bool, bIsActive, float, Duration);
 
 /**
- * Player State managing economy (Points), combat statistics (Kills, Headshots),
- * and survival scoring for the player.
- * 
- * Pedagogical Rationale:
- * - Extends Unreal Engine's native APlayerState to hold persistent match statistics.
- * - Adheres to generic player domain naming (no redundant Zombie prefix on player subsystems).
- * - Implements the Observer pattern via FOnPointsChangedSignature for decoupled HUD integration.
+ * Player State managing points economy, combat statistics, and active score multipliers.
  */
 UCLASS()
 class ISPPV1_API APlayerStateBase : public APlayerState
@@ -50,10 +45,42 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Stats")
 	int32 RoundsSurvived = 0;
 
+	/** Power-up status: true if Double Points is currently active. */
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category="Economy|PowerUps")
+	bool bIsDoublePointsActive = false;
+
+	/** Duration configured for active Double Points bonus. */
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category="Economy|PowerUps")
+	float DoublePointsDuration = 30.0f;
+
+	FTimerHandle DoublePointsTimerHandle;
+
 public:
 	/** Broadcast whenever points are gained or spent. */
 	UPROPERTY(BlueprintAssignable, Category="Economy")
 	FOnPointsChangedSignature OnPointsChanged;
+
+	/** Broadcast when Double Points is activated or expires. */
+	UPROPERTY(BlueprintAssignable, Category="Economy|PowerUps")
+	FOnDoublePointsStateChangedSignature OnDoublePointsStateChanged;
+
+	/** Activates Double Points bonus multiplier for the specified duration (resets if already active). */
+	UFUNCTION(BlueprintCallable, Category="Economy|PowerUps")
+	void ActivateDoublePoints(float Duration = 30.0f);
+
+	/** Deactivates Double Points bonus multiplier. */
+	UFUNCTION(BlueprintCallable, Category="Economy|PowerUps")
+	void DeactivateDoublePoints();
+
+	UFUNCTION(BlueprintPure, Category="Economy|PowerUps")
+	FORCEINLINE bool IsDoublePointsActive() const { return bIsDoublePointsActive; }
+
+	/** Returns remaining seconds of Double Points bonus (0.0 if inactive). */
+	UFUNCTION(BlueprintPure, Category="Economy|PowerUps")
+	float GetDoublePointsTimeRemaining() const;
+
+	UFUNCTION(BlueprintPure, Category="Economy|PowerUps")
+	FORCEINLINE float GetDoublePointsDuration() const { return DoublePointsDuration; }
 
 	/** Adds points to the player's balance and increases total score. */
 	UFUNCTION(BlueprintCallable, Category="Economy")

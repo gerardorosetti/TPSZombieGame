@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Academic Game Architecture. All Rights Reserved.
 
 #include "ZombieGame/Combat/WeaponBase.h"
+#include "ZombieGame/Combat/DroppedMagazine.h"
 #include "Components/SceneComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
@@ -10,13 +11,14 @@
 #include "TimerManager.h"
 #include "DrawDebugHelpers.h"
 #include "Camera/CameraComponent.h"
-#include "UObject/ConstructorHelpers.h"
 #include "CollisionShape.h"
 #include "Animation/AnimMontage.h"
+#include "ZombieGame/Core/ZombieGameModeBase.h"
+#include "ZombieGame/UI/CombatHUDWidget.h"
 
 AWeaponBase::AWeaponBase()
 {
-	PrimaryActorTick.bCanEverTick = false;
+	PrimaryActorTick.bCanEverTick = true;
 
 	// 1. Root Scene Component
 	RootSceneComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootScene"));
@@ -31,27 +33,136 @@ AWeaponBase::AWeaponBase()
 	WeaponStaticMesh->SetupAttachment(RootComponent);
 	WeaponStaticMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 
-	// Setup prototype mesh proportions (sleek rifle barrel)
-	WeaponStaticMesh->SetRelativeLocation(FVector(2.0f, 6.0f, -1.0f));
-	WeaponStaticMesh->SetRelativeRotation(FRotator(0.0f, -90.0f, 0.0f));
-	WeaponStaticMesh->SetRelativeScale3D(FVector(0.07f, 0.07f, 0.40f));
+	// 3. Detachable Magazine Mesh (Attached to Weapon Body for Procedural Reload)
+	MagazineStaticMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("MagazineStaticMesh"));
+	MagazineStaticMesh->SetupAttachment(WeaponStaticMesh);
+	MagazineStaticMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 
-	static ConstructorHelpers::FObjectFinder<UStaticMesh> DefaultMeshFinder(TEXT("/Game/LevelPrototyping/Meshes/SM_Cylinder.SM_Cylinder"));
-	if (DefaultMeshFinder.Succeeded())
-	{
-		WeaponStaticMesh->SetStaticMesh(DefaultMeshFinder.Object);
-	}
+	DroppedMagazineClass = ADroppedMagazine::StaticClass();
+	MuzzleOffset = FVector::ZeroVector;
+	AimingLocationOffset = FVector::ZeroVector;
+	AimingRotationOffset = FRotator::ZeroRotator;
+	AimInterpSpeed = 14.0f;
+
+	ReloadDetachTime = 0.35f;
+	ReloadTossTime = 0.85f;
+	ReloadGrabNewTime = 1.05f;
+	ReloadInsertTime = 2.05f;
 }
 
 void AWeaponBase::BeginPlay()
 {
 	Super::BeginPlay();
 
+	// Ensure reload insert timing finishes ~0.15s before full reload duration concludes
+	if (ReloadInsertTime >= WeaponConfig.ReloadDuration)
+	{
+		ReloadInsertTime = FMath::Max(ReloadGrabNewTime + 0.1f, WeaponConfig.ReloadDuration - 0.15f);
+	}
+
+	// Cache initial magazine relative transform for reload animation interpolation
+	if (MagazineStaticMesh)
+	{
+		InitialMagLocation = MagazineStaticMesh->GetRelativeLocation();
+		InitialMagRotation = MagazineStaticMesh->GetRelativeRotation();
+	}
+
+	// Cache initial weapon mesh relative transform for aim offset interpolation
+	if (WeaponStaticMesh)
+	{
+		DefaultMeshLocation = WeaponStaticMesh->GetRelativeLocation();
+		DefaultMeshRotation = WeaponStaticMesh->GetRelativeRotation();
+	}
+
 	// Initialize ammunition counters from configuration
 	CurrentMagAmmo = WeaponConfig.MagCapacity;
 	CurrentReserveAmmo = WeaponConfig.MaxReserveAmmo;
 
 	OnAmmoChanged.Broadcast(CurrentMagAmmo, CurrentReserveAmmo);
+}
+
+void AWeaponBase::Tick(float DeltaTime)
+{
+	Super::Tick(DeltaTime);
+
+	// 1. Dynamic Aim Alignment (Smooth transition between hipfire and aiming ADS offsets)
+	if (WeaponStaticMesh)
+	{
+		const FVector TargetLoc = bIsAiming ? (DefaultMeshLocation + AimingLocationOffset) : DefaultMeshLocation;
+		const FRotator TargetRot = bIsAiming ? (DefaultMeshRotation + AimingRotationOffset) : DefaultMeshRotation;
+
+		const FVector NewLoc = FMath::VInterpTo(WeaponStaticMesh->GetRelativeLocation(), TargetLoc, DeltaTime, AimInterpSpeed);
+		const FRotator NewRot = FMath::RInterpTo(WeaponStaticMesh->GetRelativeRotation(), TargetRot, DeltaTime, AimInterpSpeed);
+
+		WeaponStaticMesh->SetRelativeLocation(NewLoc);
+		WeaponStaticMesh->SetRelativeRotation(NewRot);
+	}
+
+	// 2. Procedural magazine reload animation (Hand-Synchronized with hand_l + Dropped Physics Magazine)
+	if (bIsReloading && bEnableProceduralReload && MagazineStaticMesh)
+	{
+		const float Elapsed = GetWorldTimerManager().GetTimerElapsed(ReloadTimerHandle);
+
+		// Phase 4: Fresh magazine inserted back into rifle well (~0.1s before animation concludes)
+		if (Elapsed >= ReloadInsertTime && ReloadPhase < 4)
+		{
+			ReloadPhase = 4;
+			MagazineStaticMesh->AttachToComponent(WeaponStaticMesh, FAttachmentTransformRules::SnapToTargetNotIncludingScale);
+			MagazineStaticMesh->SetRelativeLocation(InitialMagLocation);
+			MagazineStaticMesh->SetRelativeRotation(InitialMagRotation);
+			MagazineStaticMesh->SetVisibility(true);
+		}
+		// Phase 3: Fresh magazine retrieved from waist/hip (~0.2s after throw)
+		else if (Elapsed >= ReloadGrabNewTime && ReloadPhase < 3)
+		{
+			ReloadPhase = 3;
+			if (OwningCharacter.IsValid() && OwningCharacter->GetMesh())
+			{
+				MagazineStaticMesh->AttachToComponent(OwningCharacter->GetMesh(), FAttachmentTransformRules::SnapToTargetNotIncludingScale, ReloadHandSocket);
+				MagazineStaticMesh->SetRelativeLocation(MagHandOffset);
+				MagazineStaticMesh->SetRelativeRotation(MagHandRotation);
+			}
+			MagazineStaticMesh->SetVisibility(true);
+		}
+		// Phase 2: Empty magazine tossed away -> Spawn simulated physical magazine falling to ground!
+		else if (Elapsed >= ReloadTossTime && ReloadPhase < 2)
+		{
+			ReloadPhase = 2;
+			MagazineStaticMesh->SetVisibility(false);
+
+			if (UWorld* World = GetWorld())
+			{
+				const FTransform MagWorldTransform = MagazineStaticMesh->GetComponentTransform();
+				FActorSpawnParameters SpawnParams;
+				SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+
+				TSubclassOf<ADroppedMagazine> SpawnClass = DroppedMagazineClass ? DroppedMagazineClass : TSubclassOf<ADroppedMagazine>(ADroppedMagazine::StaticClass());
+				if (ADroppedMagazine* DroppedMag = World->SpawnActor<ADroppedMagazine>(SpawnClass, MagWorldTransform, SpawnParams))
+				{
+					FVector TossImpulse = (GetActorRightVector() * DroppedMagazineImpulse.Y) +
+					                      (GetActorForwardVector() * DroppedMagazineImpulse.X) +
+					                      FVector(0.0f, 0.0f, DroppedMagazineImpulse.Z);
+					if (OwningCharacter.IsValid())
+					{
+						TossImpulse += OwningCharacter->GetVelocity() * 0.4f;
+					}
+					DroppedMag->InitializeDroppedMagazine(MagazineStaticMesh->GetStaticMesh(), TossImpulse);
+				}
+			}
+		}
+		// Phase 1: Left hand reaches rifle and grabs empty magazine
+		else if (Elapsed >= ReloadDetachTime && ReloadPhase < 1)
+		{
+			ReloadPhase = 1;
+			if (OwningCharacter.IsValid() && OwningCharacter->GetMesh())
+			{
+				MagazineStaticMesh->AttachToComponent(OwningCharacter->GetMesh(), FAttachmentTransformRules::SnapToTargetNotIncludingScale, ReloadHandSocket);
+				MagazineStaticMesh->SetRelativeLocation(MagHandOffset);
+				MagazineStaticMesh->SetRelativeRotation(MagHandRotation);
+			}
+			MagazineStaticMesh->SetVisibility(true);
+		}
+	}
 }
 
 void AWeaponBase::StartFire()
@@ -136,7 +247,31 @@ void AWeaponBase::FireShot()
 		}
 	}
 
-	// 3. Physical trace from Muzzle to Target Point with SphereTrace
+	// 3. Point-Blank Close Quarters Contact Check:
+	// If a zombie is hugging the player (between Camera/Chest and Muzzle tip),
+	// ensure they take the damage so bullets never tunnel through enemies at zero distance!
+	FHitResult CloseHit;
+	bool bCloseHit = false;
+	if (OwningCharacter.IsValid())
+	{
+		FCollisionQueryParams CloseQueryParams;
+		CloseQueryParams.AddIgnoredActor(this);
+		CloseQueryParams.AddIgnoredActor(OwningCharacter.Get());
+		CloseQueryParams.bReturnPhysicalMaterial = true;
+
+		const FVector ChestLoc = OwningCharacter->GetActorLocation() + FVector(0.0f, 0.0f, 45.0f);
+		bCloseHit = World->SweepSingleByChannel(
+			CloseHit,
+			ChestLoc,
+			TraceStart + (GetMuzzleForwardVector() * 25.0f),
+			FQuat::Identity,
+			ECC_Visibility,
+			FCollisionShape::MakeSphere(WeaponConfig.BulletRadius * 3.0f),
+			CloseQueryParams
+		);
+	}
+
+	// 4. Physical trace from Muzzle to Target Point with SphereTrace
 	const FVector BallisticDirection = (TargetPoint - TraceStart).GetSafeNormal();
 	const float DistanceToTarget = FVector::Dist(TraceStart, TargetPoint);
 	const FVector BallisticEnd = TraceStart + (BallisticDirection * (DistanceToTarget + 50.0f));
@@ -152,19 +287,29 @@ void AWeaponBase::FireShot()
 	FCollisionShape BulletShape = FCollisionShape::MakeSphere(WeaponConfig.BulletRadius);
 
 	FHitResult BallisticHit;
-	const bool bHit = World->SweepSingleByChannel(
-		BallisticHit,
-		TraceStart,
-		BallisticEnd,
-		FQuat::Identity,
-		ECC_Visibility,
-		BulletShape,
-		BallisticQueryParams
-	);
+	bool bHit = false;
+
+	if (bCloseHit && CloseHit.GetActor() && CloseHit.GetActor() != OwningCharacter.Get())
+	{
+		BallisticHit = CloseHit;
+		bHit = true;
+	}
+	else
+	{
+		bHit = World->SweepSingleByChannel(
+			BallisticHit,
+			TraceStart,
+			BallisticEnd,
+			FQuat::Identity,
+			ECC_Visibility,
+			BulletShape,
+			BallisticQueryParams
+		);
+	}
 
 	const FVector HitPoint = bHit ? BallisticHit.ImpactPoint : TargetPoint;
 
-	// 4. Debug Tracer (Cyan for miss, Red for impact)
+	// 5. Visual Tracer strictly from MuzzleLocation to HitPoint!
 	DrawDebugLine(World, TraceStart, HitPoint, bHit ? FColor::Red : FColor::Cyan, false, 1.2f, 0, 1.5f);
 
 	if (bHit && BallisticHit.GetActor())
@@ -178,6 +323,16 @@ void AWeaponBase::FireShot()
 		{
 			FZombieDamageData DamageData;
 			DamageData.BaseDamage = WeaponConfig.BaseDamage;
+
+			// Global Insta-Kill match buff check
+			if (AZombieGameModeBase* GM = Cast<AZombieGameModeBase>(World->GetAuthGameMode()))
+			{
+				if (GM->IsInstaKillActive())
+				{
+					DamageData.BaseDamage = 100000.0f;
+				}
+			}
+
 			DamageData.HitLocation = BallisticHit.ImpactPoint;
 			DamageData.HitBoneName = BallisticHit.BoneName;
 			DamageData.HitImpulse = BallisticDirection * 3000.0f;
@@ -201,6 +356,16 @@ void AWeaponBase::FireShot()
 
 			const float ActualDamage = IZombieDamageableInterface::Execute_TakeZombieDamage(StruckActor, DamageData);
 
+			// Broadcast hit event for hitmarkers and audio
+			OnWeaponHitTarget.Broadcast(DamageData.bIsHeadshot);
+
+			if (AZombieGameModeBase* GM = Cast<AZombieGameModeBase>(World->GetAuthGameMode()))
+			{
+				if (UCombatHUDWidget* HUD = GM->GetActiveHUDWidget())
+				{
+					HUD->ShowHitmarker(DamageData.bIsHeadshot);
+				}
+			}
 
 			UE_LOG(LogTemp, Log, TEXT("[%s] Struck %s for %f dmg (Headshot: %s) | Ammo: %d/%d"),
 				*WeaponConfig.WeaponName, *StruckActor->GetName(), ActualDamage,
@@ -227,6 +392,22 @@ void AWeaponBase::FireShot()
 	}
 }
 
+void AWeaponBase::RefillAmmo(bool bRefillMag, bool bRefillReserve)
+{
+	if (bRefillMag)
+	{
+		CurrentMagAmmo = WeaponConfig.MagCapacity;
+	}
+	if (bRefillReserve)
+	{
+		CurrentReserveAmmo = WeaponConfig.MaxReserveAmmo;
+	}
+
+	OnAmmoChanged.Broadcast(CurrentMagAmmo, CurrentReserveAmmo);
+	UE_LOG(LogTemp, Log, TEXT("[%s] Ammo refilled! Current: %d / Reserve: %d"),
+		*WeaponConfig.WeaponName, CurrentMagAmmo, CurrentReserveAmmo);
+}
+
 void AWeaponBase::Reload()
 {
 	if (bIsReloading || CurrentMagAmmo >= WeaponConfig.MagCapacity || CurrentReserveAmmo <= 0)
@@ -235,6 +416,7 @@ void AWeaponBase::Reload()
 	}
 
 	bIsReloading = true;
+	ReloadPhase = 0;
 	StopFire();
 
 	OnReloadStateChanged.Broadcast(true);
@@ -258,6 +440,15 @@ void AWeaponBase::Reload()
 void AWeaponBase::FinishReload()
 {
 	bIsReloading = false;
+	ReloadPhase = 0;
+
+	if (MagazineStaticMesh)
+	{
+		MagazineStaticMesh->AttachToComponent(WeaponStaticMesh, FAttachmentTransformRules::SnapToTargetNotIncludingScale);
+		MagazineStaticMesh->SetRelativeLocation(InitialMagLocation);
+		MagazineStaticMesh->SetRelativeRotation(InitialMagRotation);
+		MagazineStaticMesh->SetVisibility(true);
+	}
 
 	const int32 AmmoNeeded = WeaponConfig.MagCapacity - CurrentMagAmmo;
 	const int32 AmmoToLoad = FMath::Min(AmmoNeeded, CurrentReserveAmmo);
@@ -278,6 +469,16 @@ void AWeaponBase::CancelReload()
 	{
 		GetWorldTimerManager().ClearTimer(ReloadTimerHandle);
 		bIsReloading = false;
+		ReloadPhase = 0;
+
+		if (MagazineStaticMesh)
+		{
+			MagazineStaticMesh->AttachToComponent(WeaponStaticMesh, FAttachmentTransformRules::SnapToTargetNotIncludingScale);
+			MagazineStaticMesh->SetRelativeLocation(InitialMagLocation);
+			MagazineStaticMesh->SetRelativeRotation(InitialMagRotation);
+			MagazineStaticMesh->SetVisibility(true);
+		}
+
 		OnReloadStateChanged.Broadcast(false);
 
 		if (ReloadMontage && OwningCharacter.IsValid())
@@ -310,19 +511,30 @@ void AWeaponBase::AttachToCharacter(ACharacter* InCharacter, FName SocketName)
 
 FVector AWeaponBase::GetMuzzleLocation() const
 {
-	// Priority: Skeletal mesh socket -> Static mesh socket -> Actor location
+	const FVector RotatedOffset = GetActorRotation().RotateVector(MuzzleOffset);
+
+	// Priority 1: Socket on Skeletal Mesh
 	if (WeaponSkeletalMesh && WeaponSkeletalMesh->DoesSocketExist(MuzzleSocketName))
 	{
-		return WeaponSkeletalMesh->GetSocketLocation(MuzzleSocketName);
+		return WeaponSkeletalMesh->GetSocketLocation(MuzzleSocketName) + RotatedOffset;
 	}
 
+	// Priority 2: Socket on Static Mesh
 	if (WeaponStaticMesh && WeaponStaticMesh->DoesSocketExist(MuzzleSocketName))
 	{
-		return WeaponStaticMesh->GetSocketLocation(MuzzleSocketName);
+		return WeaponStaticMesh->GetSocketLocation(MuzzleSocketName) + RotatedOffset;
 	}
 
-	// Fallback forward tip of the weapon
-	return GetActorLocation() + (GetActorForwardVector() * 50.0f);
+	// Priority 3: Compute forward-most physical tip from Static Mesh bounding box
+	if (WeaponStaticMesh && WeaponStaticMesh->GetStaticMesh())
+	{
+		const FBoxSphereBounds MeshBounds = WeaponStaticMesh->GetStaticMesh()->GetBounds();
+		const FVector MeshTip = WeaponStaticMesh->GetComponentLocation() + (WeaponStaticMesh->GetForwardVector() * MeshBounds.BoxExtent.X);
+		return MeshTip + RotatedOffset;
+	}
+
+	// Priority 4: Fallback forward tip of the weapon actor
+	return GetActorLocation() + (GetActorForwardVector() * 70.0f) + RotatedOffset;
 }
 
 FVector AWeaponBase::GetMuzzleForwardVector() const
@@ -332,9 +544,13 @@ FVector AWeaponBase::GetMuzzleForwardVector() const
 		return WeaponSkeletalMesh->GetSocketRotation(MuzzleSocketName).Vector();
 	}
 
-	if (WeaponStaticMesh && WeaponStaticMesh->DoesSocketExist(MuzzleSocketName))
+	if (WeaponStaticMesh)
 	{
-		return WeaponStaticMesh->GetSocketRotation(MuzzleSocketName).Vector();
+		if (WeaponStaticMesh->DoesSocketExist(MuzzleSocketName))
+		{
+			return WeaponStaticMesh->GetSocketRotation(MuzzleSocketName).Vector();
+		}
+		return WeaponStaticMesh->GetForwardVector();
 	}
 
 	return GetActorForwardVector();

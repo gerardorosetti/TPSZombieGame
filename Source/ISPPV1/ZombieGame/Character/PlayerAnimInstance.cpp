@@ -51,7 +51,7 @@ void UPlayerAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 	// 2. Combat & Aiming State
 	if (CombatComponent)
 	{
-		bIsAiming = CombatComponent->IsAiming();
+		bIsAiming = CombatComponent->IsWeaponRaised();
 		CurrentWeapon = CombatComponent->GetCurrentWeapon();
 	}
 

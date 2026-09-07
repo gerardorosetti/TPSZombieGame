@@ -26,13 +26,7 @@ enum class EZombieAIState : uint8
 };
 
 /**
- * AI Controller orchestrating perception, navigation, and state decisions for zombie enemies.
- * 
- * Pedagogical Architecture:
- * - Implements UAIPerceptionComponent with Sight and Damage stimuli.
- * - Manages state transitions (Idle -> Chase -> Attack -> Dead).
- * - Navigates dynamically along the NavMesh toward player targets.
- * - Handles target acquisition, loss of sight, and immediate aggro upon receiving damage.
+ * AI Controller managing perception, state transitions, and navigation for enemy characters.
  */
 UCLASS()
 class ISPPV1_API AZombieAIController : public AAIController
@@ -108,9 +102,18 @@ public:
 	UFUNCTION(BlueprintCallable, Category="AI|Combat")
 	void NotifyDamageReceived(AActor* Attacker);
 
+	/** Forces an immediate path re-evaluation toward target (e.g. when an obstacle door opens). */
+	UFUNCTION(BlueprintCallable, Category="AI|Navigation")
+	void ForceRepath();
+
 	UFUNCTION(BlueprintPure, Category="AI|State")
 	EZombieAIState GetCurrentState() const { return CurrentState; }
 
 	UFUNCTION(BlueprintPure, Category="AI|State")
 	AActor* GetTargetActor() const { return TargetActor.Get(); }
+
+protected:
+	float TimeSinceLastRepath = 0.0f;
+	float RepathInterval = 0.25f;
+	FVector LastTargetLocation = FVector::ZeroVector;
 };
