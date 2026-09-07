@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Academic Game Architecture. All Rights Reserved.
 
 #include "ZombieGame/Gameplay/PowerUpBase.h"
+#include "ZombieGame/Core/ZombieLog.h"
 #include "ZombieGame/Character/PlayerCharacter.h"
 #include "ZombieGame/Combat/CombatComponent.h"
 #include "ZombieGame/Combat/WeaponBase.h"
@@ -9,6 +10,9 @@
 #include "Components/SphereComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/World.h"
+#include "Kismet/GameplayStatics.h"
+#include "Sound/SoundBase.h"
+#include "Sound/SoundAttenuation.h"
 
 APowerUpBase::APowerUpBase()
 {
@@ -48,6 +52,11 @@ void APowerUpBase::BeginPlay()
 	if (CollisionSphere)
 	{
 		CollisionSphere->OnComponentBeginOverlap.AddDynamic(this, &APowerUpBase::OnOverlapBegin);
+	}
+
+	if (SpawnSound)
+	{
+		UGameplayStatics::PlaySoundAtLocation(this, SpawnSound, GetActorLocation(), FRotator::ZeroRotator, 1.0f, 1.0f, 0.0f, SpatialAttenuation);
 	}
 }
 
@@ -109,6 +118,18 @@ void APowerUpBase::ApplyPowerUpEffect(APlayerCharacter* Player)
 		return;
 	}
 
+	if (CollectSound)
+	{
+		if (SpatialAttenuation)
+		{
+			UGameplayStatics::PlaySoundAtLocation(this, CollectSound, GetActorLocation(), FRotator::ZeroRotator, 1.0f, 1.0f, 0.0f, SpatialAttenuation);
+		}
+		else
+		{
+			UGameplayStatics::PlaySound2D(this, CollectSound);
+		}
+	}
+
 	UWorld* World = GetWorld();
 
 	switch (PowerUpType)
@@ -117,7 +138,7 @@ void APowerUpBase::ApplyPowerUpEffect(APlayerCharacter* Player)
 		if (UCombatComponent* CombatComp = Player->GetCombatComponent())
 		{
 			CombatComp->RefillAllWeaponsAmmo();
-			UE_LOG(LogTemp, Log, TEXT("[PowerUp] MAX AMMO applied to player!"));
+			ZOMBIE_LOG(Log, TEXT("[PowerUp] MAX AMMO applied to player!"));
 		}
 		break;
 
@@ -127,7 +148,7 @@ void APowerUpBase::ApplyPowerUpEffect(APlayerCharacter* Player)
 			if (AZombieGameModeBase* GM = Cast<AZombieGameModeBase>(World->GetAuthGameMode()))
 			{
 				GM->ActivateInstaKill(30.0f);
-				UE_LOG(LogTemp, Log, TEXT("[PowerUp] INSTA-KILL activated for 30 seconds!"));
+				ZOMBIE_LOG(Log, TEXT("[PowerUp] INSTA-KILL activated for 30 seconds!"));
 			}
 		}
 		break;
@@ -136,7 +157,7 @@ void APowerUpBase::ApplyPowerUpEffect(APlayerCharacter* Player)
 		if (APlayerStateBase* PS = Player->GetPlayerState<APlayerStateBase>())
 		{
 			PS->ActivateDoublePoints(30.0f);
-			UE_LOG(LogTemp, Log, TEXT("[PowerUp] DOUBLE POINTS activated for 30 seconds!"));
+			ZOMBIE_LOG(Log, TEXT("[PowerUp] DOUBLE POINTS activated for 30 seconds!"));
 		}
 		break;
 
@@ -146,7 +167,7 @@ void APowerUpBase::ApplyPowerUpEffect(APlayerCharacter* Player)
 			if (AZombieGameModeBase* GM = Cast<AZombieGameModeBase>(World->GetAuthGameMode()))
 			{
 				GM->TriggerNuke(Player);
-				UE_LOG(LogTemp, Log, TEXT("[PowerUp] NUKE detonated!"));
+				ZOMBIE_LOG(Log, TEXT("[PowerUp] NUKE detonated!"));
 			}
 		}
 		break;

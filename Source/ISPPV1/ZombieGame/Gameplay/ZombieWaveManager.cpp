@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Academic Game Architecture. All Rights Reserved.
 
 #include "ZombieGame/Gameplay/ZombieWaveManager.h"
+#include "ZombieGame/Core/ZombieLog.h"
 #include "ZombieGame/Gameplay/ZombieSpawnPoint.h"
 #include "ZombieGame/Character/ZombieEnemyBase.h"
 #include "ZombieGame/Core/PlayerStateBase.h"
@@ -36,11 +37,14 @@ void AZombieWaveManager::BeginPlay()
 	{
 		for (TActorIterator<AZombieSpawnPoint> It(World); It; ++It)
 		{
-			RegisterSpawnPoint(*It);
+			if (IsValid(*It))
+			{
+				RegisterSpawnPoint(*It);
+			}
 		}
 	}
 
-	UE_LOG(LogTemp, Log, TEXT("[ZombieWaveManager] Discovered %d spawn points in level."), SpawnPoints.Num());
+	ZOMBIE_LOG(Log, TEXT("[ZombieWaveManager] Discovered %d spawn points in level."), SpawnPoints.Num());
 
 	// 2. Schedule initial match warmup before Wave 1 begins
 	SetWaveState(EWaveState::WaitingToStart);
@@ -79,7 +83,7 @@ void AZombieWaveManager::SetWaveState(EWaveState NewState)
 
 	CurrentWaveState = NewState;
 	OnWaveStateChanged.Broadcast(CurrentWaveState);
-	UE_LOG(LogTemp, Log, TEXT("[ZombieWaveManager] State Transition -> %d"), static_cast<int32>(CurrentWaveState));
+	ZOMBIE_LOG(Log, TEXT("[ZombieWaveManager] State Transition -> %d"), static_cast<int32>(CurrentWaveState));
 }
 
 int32 AZombieWaveManager::CalculateZombiesForWave(int32 WaveNum) const
@@ -117,9 +121,9 @@ void AZombieWaveManager::StartNextWave()
 	OnWaveStarted.Broadcast(CurrentWaveNumber);
 	OnZombiesRemainingChanged.Broadcast(TotalZombiesForWave, TotalZombiesForWave);
 
-	UE_LOG(LogTemp, Warning, TEXT("========================================"));
-	UE_LOG(LogTemp, Warning, TEXT("[ZombieWaveManager] >>> STARTING ROUND %d (%d Zombies) <<<"), CurrentWaveNumber, TotalZombiesForWave);
-	UE_LOG(LogTemp, Warning, TEXT("========================================"));
+	ZOMBIE_LOG(Warning, TEXT("========================================"));
+	ZOMBIE_LOG(Warning, TEXT("[ZombieWaveManager] >>> STARTING ROUND %d (%d Zombies) <<<"), CurrentWaveNumber, TotalZombiesForWave);
+	ZOMBIE_LOG(Warning, TEXT("========================================"));
 
 	// Start spawning loop
 	GetWorldTimerManager().SetTimer(
@@ -173,7 +177,7 @@ void AZombieWaveManager::SpawnSingleZombie()
 	{
 		ChosenSpawnPoint->GetValidSpawnLocation(SpawnLocation);
 		SpawnRotation = FRotator(0.0f, ChosenSpawnPoint->GetActorRotation().Yaw, 0.0f);
-		UE_LOG(LogTemp, Verbose, TEXT("[ZombieWaveManager] Spawning zombie from Spawner '%s' (Zone: '%s') at %s"),
+		ZOMBIE_LOG(Verbose, TEXT("[ZombieWaveManager] Spawning zombie from Spawner '%s' (Zone: '%s') at %s"),
 			*ChosenSpawnPoint->GetName(), *ChosenSpawnPoint->GetZoneName().ToString(), *SpawnLocation.ToString());
 	}
 	else
@@ -181,7 +185,7 @@ void AZombieWaveManager::SpawnSingleZombie()
 		// If spawners exist in level but none are currently active (e.g. all behind locked doors), do NOT spawn in random rooms!
 		if (SpawnPoints.Num() > 0)
 		{
-			UE_LOG(LogTemp, Verbose, TEXT("[ZombieWaveManager] Waiting to spawn: %d spawners placed, but none active in unlocked zones."), SpawnPoints.Num());
+			ZOMBIE_LOG(Verbose, TEXT("[ZombieWaveManager] Waiting to spawn: %d spawners placed, but none active in unlocked zones."), SpawnPoints.Num());
 			return;
 		}
 
@@ -257,7 +261,7 @@ void AZombieWaveManager::SpawnSingleZombie()
 	AZombieEnemyBase* SpawnedZombie = World->SpawnActor<AZombieEnemyBase>(ZombieClass, SpawnTransform, SpawnParams);
 	if (!SpawnedZombie)
 	{
-		UE_LOG(LogTemp, Error, TEXT("[ZombieWaveManager] Failed to instantiate zombie from class %s"), *ZombieClass->GetName());
+		ZOMBIE_LOG(Error, TEXT("[ZombieWaveManager] Failed to instantiate zombie from class %s"), *ZombieClass->GetName());
 		return;
 	}
 
@@ -273,7 +277,7 @@ void AZombieWaveManager::SpawnSingleZombie()
 	const int32 Remaining = GetRemainingZombiesCount();
 	OnZombiesRemainingChanged.Broadcast(Remaining, TotalZombiesForWave);
 
-	UE_LOG(LogTemp, Verbose, TEXT("[ZombieWaveManager] Spawned zombie #%d/%d (Alive: %d)"),
+	ZOMBIE_LOG(Verbose, TEXT("[ZombieWaveManager] Spawned zombie #%d/%d (Alive: %d)"),
 		ZombiesSpawnedThisWave, TotalZombiesForWave, ZombiesAliveCount);
 
 	// If that was the last zombie of the wave, stop the spawner
@@ -290,7 +294,7 @@ void AZombieWaveManager::HandleZombieDeath(AZombieEnemyBase* DeadZombie)
 	const int32 Remaining = GetRemainingZombiesCount();
 	OnZombiesRemainingChanged.Broadcast(Remaining, TotalZombiesForWave);
 
-	UE_LOG(LogTemp, Log, TEXT("[ZombieWaveManager] Zombie eliminated. %d remaining in Wave %d."),
+	ZOMBIE_LOG(Log, TEXT("[ZombieWaveManager] Zombie eliminated. %d remaining in Wave %d."),
 		Remaining, CurrentWaveNumber);
 
 	// Check if wave is completed (all spawned and all dead)
@@ -309,7 +313,7 @@ void AZombieWaveManager::StartIntermission()
 	IntermissionTimeRemaining = IntermissionDuration;
 	OnIntermissionCountdown.Broadcast(IntermissionTimeRemaining);
 
-	UE_LOG(LogTemp, Warning, TEXT("[ZombieWaveManager] Wave %d Cleared! Rest period: %0.1fs"),
+	ZOMBIE_LOG(Warning, TEXT("[ZombieWaveManager] Wave %d Cleared! Rest period: %0.1fs"),
 		CurrentWaveNumber, IntermissionDuration);
 
 	// Tick countdown every second
@@ -346,9 +350,9 @@ void AZombieWaveManager::TriggerGameOver()
 	SetWaveState(EWaveState::GameOver);
 	OnGameOver.Broadcast();
 
-	UE_LOG(LogTemp, Warning, TEXT("========================================"));
-	UE_LOG(LogTemp, Warning, TEXT("[ZombieWaveManager] >>> GAME OVER <<< (Survived %d Rounds)"), CurrentWaveNumber - 1);
-	UE_LOG(LogTemp, Warning, TEXT("========================================"));
+	ZOMBIE_LOG(Warning, TEXT("========================================"));
+	ZOMBIE_LOG(Warning, TEXT("[ZombieWaveManager] >>> GAME OVER <<< (Survived %d Rounds)"), CurrentWaveNumber - 1);
+	ZOMBIE_LOG(Warning, TEXT("========================================"));
 }
 
 void AZombieWaveManager::RegisterSpawnPoint(AZombieSpawnPoint* NewSpawnPoint)

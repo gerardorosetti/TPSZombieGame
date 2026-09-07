@@ -58,6 +58,18 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Obstacle|Config")
 	FName ZoneToUnlock = NAME_None;
 
+	// ----------------------------------------------------------------------------------
+	// Audio & Spatial Sound (3D Attenuation)
+	// ----------------------------------------------------------------------------------
+
+	/** Spatial attenuation asset for 3D door audio. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Obstacle|Audio")
+	TObjectPtr<class USoundAttenuation> SpatialAttenuation;
+
+	/** Sound played when the door/obstacle is opened. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Obstacle|Audio")
+	TObjectPtr<class USoundBase> DoorOpenSound;
+
 	/** True if this barrier has already been purchased and unlocked. */
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category="Obstacle|State")
 	bool bIsOpened = false;

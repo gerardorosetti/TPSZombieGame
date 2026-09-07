@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Academic Game Architecture. All Rights Reserved.
 
 #include "ZombieGame/Combat/WeaponBase.h"
+#include "ZombieGame/Core/ZombieLog.h"
 #include "ZombieGame/Combat/DroppedMagazine.h"
 #include "Components/SceneComponent.h"
 #include "Components/SkeletalMeshComponent.h"
@@ -15,6 +16,12 @@
 #include "Animation/AnimMontage.h"
 #include "ZombieGame/Core/ZombieGameModeBase.h"
 #include "ZombieGame/UI/CombatHUDWidget.h"
+#include "Kismet/GameplayStatics.h"
+#include "NiagaraFunctionLibrary.h"
+#include "NiagaraComponent.h"
+#include "Sound/SoundBase.h"
+#include "Sound/SoundAttenuation.h"
+#include "Camera/CameraShakeBase.h"
 
 AWeaponBase::AWeaponBase()
 {
@@ -81,6 +88,17 @@ void AWeaponBase::BeginPlay()
 	OnAmmoChanged.Broadcast(CurrentMagAmmo, CurrentReserveAmmo);
 }
 
+void AWeaponBase::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(FireTimerHandle);
+		World->GetTimerManager().ClearTimer(ReloadTimerHandle);
+	}
+
+	Super::EndPlay(EndPlayReason);
+}
+
 void AWeaponBase::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
@@ -107,6 +125,10 @@ void AWeaponBase::Tick(float DeltaTime)
 		if (Elapsed >= ReloadInsertTime && ReloadPhase < 4)
 		{
 			ReloadPhase = 4;
+			if (MagInSound)
+			{
+				UGameplayStatics::PlaySoundAtLocation(this, MagInSound, GetActorLocation(), FRotator::ZeroRotator, 1.0f, 1.0f, 0.0f, SpatialAttenuation);
+			}
 			MagazineStaticMesh->AttachToComponent(WeaponStaticMesh, FAttachmentTransformRules::SnapToTargetNotIncludingScale);
 			MagazineStaticMesh->SetRelativeLocation(InitialMagLocation);
 			MagazineStaticMesh->SetRelativeRotation(InitialMagRotation);
@@ -154,6 +176,10 @@ void AWeaponBase::Tick(float DeltaTime)
 		else if (Elapsed >= ReloadDetachTime && ReloadPhase < 1)
 		{
 			ReloadPhase = 1;
+			if (MagOutSound)
+			{
+				UGameplayStatics::PlaySoundAtLocation(this, MagOutSound, GetActorLocation(), FRotator::ZeroRotator, 1.0f, 1.0f, 0.0f, SpatialAttenuation);
+			}
 			if (OwningCharacter.IsValid() && OwningCharacter->GetMesh())
 			{
 				MagazineStaticMesh->AttachToComponent(OwningCharacter->GetMesh(), FAttachmentTransformRules::SnapToTargetNotIncludingScale, ReloadHandSocket);
@@ -169,9 +195,17 @@ void AWeaponBase::StartFire()
 {
 	if (!CanFire())
 	{
-		if (CurrentMagAmmo == 0 && CurrentReserveAmmo > 0)
+		if (CurrentMagAmmo == 0)
 		{
-			Reload();
+			if (DryFireSound)
+			{
+				UGameplayStatics::PlaySoundAtLocation(this, DryFireSound, GetMuzzleLocation(), FRotator::ZeroRotator, 1.0f, 1.0f, 0.0f, SpatialAttenuation);
+			}
+
+			if (CurrentReserveAmmo > 0)
+			{
+				Reload();
+			}
 		}
 		return;
 	}
@@ -209,8 +243,49 @@ void AWeaponBase::FireShot()
 	CurrentMagAmmo = FMath::Max(0, CurrentMagAmmo - 1);
 	OnAmmoChanged.Broadcast(CurrentMagAmmo, CurrentReserveAmmo);
 
-	// 2. Ballistics Pipeline: TPS Parallax-Compensated SphereTrace
 	FVector TraceStart = GetMuzzleLocation();
+
+	// 2. Gunshot audio, Camera Shake and Muzzle Flash
+	if (FireSound)
+	{
+		UGameplayStatics::PlaySoundAtLocation(this, FireSound, TraceStart, FRotator::ZeroRotator, 1.0f, 1.0f, 0.0f, SpatialAttenuation);
+	}
+
+	if (FireCameraShakeClass && OwningCharacter.IsValid())
+	{
+		if (APlayerController* PC = Cast<APlayerController>(OwningCharacter->GetController()))
+		{
+			PC->ClientStartCameraShake(FireCameraShakeClass);
+		}
+	}
+
+	if (MuzzleFlashFX)
+	{
+		USceneComponent* AttachComp = WeaponSkeletalMesh ? Cast<USceneComponent>(WeaponSkeletalMesh) : Cast<USceneComponent>(WeaponStaticMesh);
+		if (AttachComp)
+		{
+			UNiagaraFunctionLibrary::SpawnSystemAttached(
+				MuzzleFlashFX,
+				AttachComp,
+				NAME_None,
+				TraceStart,
+				GetMuzzleForwardVector().Rotation(),
+				EAttachLocation::KeepWorldPosition,
+				true
+			);
+		}
+		else if (World)
+		{
+			UNiagaraFunctionLibrary::SpawnSystemAtLocation(
+				World,
+				MuzzleFlashFX,
+				TraceStart,
+				GetMuzzleForwardVector().Rotation()
+			);
+		}
+	}
+
+	// 3. Ballistics Pipeline: TPS Parallax-Compensated SphereTrace
 	FVector TargetPoint = TraceStart + (GetMuzzleForwardVector() * WeaponConfig.MaxRange);
 
 	// Determine aim point from player's camera if owned by a character
@@ -310,15 +385,35 @@ void AWeaponBase::FireShot()
 	const FVector HitPoint = bHit ? BallisticHit.ImpactPoint : TargetPoint;
 
 	// 5. Visual Tracer strictly from MuzzleLocation to HitPoint!
-	DrawDebugLine(World, TraceStart, HitPoint, bHit ? FColor::Red : FColor::Cyan, false, 1.2f, 0, 1.5f);
+	if (bEnableDebugTraces)
+	{
+		DrawDebugLine(World, TraceStart, HitPoint, bHit ? FColor::Red : FColor::Cyan, false, 1.2f, 0, 1.5f);
+	}
+
+	if (TracerFX)
+	{
+		UNiagaraComponent* TracerComp = UNiagaraFunctionLibrary::SpawnSystemAtLocation(
+			World,
+			TracerFX,
+			TraceStart,
+			BallisticDirection.Rotation()
+		);
+		if (TracerComp)
+		{
+			TracerComp->SetVectorParameter(TEXT("BeamEnd"), HitPoint);
+		}
+	}
 
 	if (bHit && BallisticHit.GetActor())
 	{
-		DrawDebugSphere(World, BallisticHit.ImpactPoint, WeaponConfig.BulletRadius * 2.0f, 10, FColor::Yellow, false, 1.2f);
+		if (bEnableDebugTraces)
+		{
+			DrawDebugSphere(World, BallisticHit.ImpactPoint, WeaponConfig.BulletRadius * 2.0f, 10, FColor::Yellow, false, 1.2f);
+		}
 
 		AActor* StruckActor = BallisticHit.GetActor();
 
-		// Check for IZombieDamageableInterface
+		// Check for IZombieDamageableInterface (Living enemy or flesh target)
 		if (StruckActor->Implements<UZombieDamageableInterface>())
 		{
 			FZombieDamageData DamageData;
@@ -356,6 +451,33 @@ void AWeaponBase::FireShot()
 
 			const float ActualDamage = IZombieDamageableInterface::Execute_TakeZombieDamage(StruckActor, DamageData);
 
+			// Spawn Niagara blood splash oriented along impact normal
+			if (FleshImpactFX)
+			{
+				UNiagaraFunctionLibrary::SpawnSystemAtLocation(
+					World,
+					FleshImpactFX,
+					BallisticHit.ImpactPoint,
+					BallisticHit.ImpactNormal.Rotation()
+				);
+			}
+
+			// Play 3D spatial flesh impact audio (headshot or body)
+			USoundBase* FleshSoundToPlay = (DamageData.bIsHeadshot && HeadshotFleshImpactSound) ? HeadshotFleshImpactSound.Get() : FleshImpactSound.Get();
+			if (FleshSoundToPlay)
+			{
+				UGameplayStatics::PlaySoundAtLocation(
+					World,
+					FleshSoundToPlay,
+					BallisticHit.ImpactPoint,
+					FRotator::ZeroRotator,
+					1.0f,
+					1.0f,
+					0.0f,
+					SpatialAttenuation
+				);
+			}
+
 			// Broadcast hit event for hitmarkers and audio
 			OnWeaponHitTarget.Broadcast(DamageData.bIsHeadshot);
 
@@ -367,9 +489,48 @@ void AWeaponBase::FireShot()
 				}
 			}
 
-			UE_LOG(LogTemp, Log, TEXT("[%s] Struck %s for %f dmg (Headshot: %s) | Ammo: %d/%d"),
+			ZOMBIE_LOG(Log, TEXT("[%s] Struck %s for %f dmg (Headshot: %s) | Ammo: %d/%d"),
 				*WeaponConfig.WeaponName, *StruckActor->GetName(), ActualDamage,
 				DamageData.bIsHeadshot ? TEXT("YES") : TEXT("NO"), CurrentMagAmmo, CurrentReserveAmmo);
+		}
+		else
+		{
+			// World Static / Environment Hit: sparks, dust and bullet hole decal
+			if (WorldImpactFX)
+			{
+				UNiagaraFunctionLibrary::SpawnSystemAtLocation(
+					World,
+					WorldImpactFX,
+					BallisticHit.ImpactPoint,
+					BallisticHit.ImpactNormal.Rotation()
+				);
+			}
+
+			if (WorldImpactSound)
+			{
+				UGameplayStatics::PlaySoundAtLocation(
+					World,
+					WorldImpactSound,
+					BallisticHit.ImpactPoint,
+					FRotator::ZeroRotator,
+					1.0f,
+					1.0f,
+					0.0f,
+					SpatialAttenuation
+				);
+			}
+
+			if (BulletHoleDecal)
+			{
+				UGameplayStatics::SpawnDecalAtLocation(
+					World,
+					BulletHoleDecal,
+					BulletHoleDecalSize,
+					BallisticHit.ImpactPoint,
+					(-BallisticHit.ImpactNormal).Rotation(),
+					30.0f
+				);
+			}
 		}
 
 		OnWeaponFired.Broadcast(BallisticHit);
@@ -404,7 +565,7 @@ void AWeaponBase::RefillAmmo(bool bRefillMag, bool bRefillReserve)
 	}
 
 	OnAmmoChanged.Broadcast(CurrentMagAmmo, CurrentReserveAmmo);
-	UE_LOG(LogTemp, Log, TEXT("[%s] Ammo refilled! Current: %d / Reserve: %d"),
+	ZOMBIE_LOG(Log, TEXT("[%s] Ammo refilled! Current: %d / Reserve: %d"),
 		*WeaponConfig.WeaponName, CurrentMagAmmo, CurrentReserveAmmo);
 }
 
@@ -434,7 +595,7 @@ void AWeaponBase::Reload()
 		false
 	);
 
-	UE_LOG(LogTemp, Log, TEXT("[%s] Reload started (%f seconds)..."), *WeaponConfig.WeaponName, WeaponConfig.ReloadDuration);
+	ZOMBIE_LOG(Log, TEXT("[%s] Reload started (%f seconds)..."), *WeaponConfig.WeaponName, WeaponConfig.ReloadDuration);
 }
 
 void AWeaponBase::FinishReload()
@@ -459,7 +620,7 @@ void AWeaponBase::FinishReload()
 	OnAmmoChanged.Broadcast(CurrentMagAmmo, CurrentReserveAmmo);
 	OnReloadStateChanged.Broadcast(false);
 
-	UE_LOG(LogTemp, Log, TEXT("[%s] Reload complete! Mag: %d, Reserve: %d"),
+	ZOMBIE_LOG(Log, TEXT("[%s] Reload complete! Mag: %d, Reserve: %d"),
 		*WeaponConfig.WeaponName, CurrentMagAmmo, CurrentReserveAmmo);
 }
 

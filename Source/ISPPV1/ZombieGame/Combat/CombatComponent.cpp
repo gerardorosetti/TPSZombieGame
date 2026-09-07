@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Academic Game Architecture. All Rights Reserved.
 
 #include "ZombieGame/Combat/CombatComponent.h"
+#include "ZombieGame/Core/ZombieLog.h"
 #include "ZombieGame/Combat/WeaponBase.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
@@ -219,7 +220,7 @@ void UCombatComponent::EquipWeapon(TSubclassOf<AWeaponBase> NewWeaponClass)
 		{
 			CurrentWeapon->AttachToCharacter(OwnerCharacter, WeaponAttachSocket);
 			CurrentWeapon->SetAiming(bIsAiming);
-			UE_LOG(LogTemp, Log, TEXT("[CombatComponent] Successfully equipped and attached weapon: %s to socket: %s"),
+			ZOMBIE_LOG(Log, TEXT("[CombatComponent] Successfully equipped and attached weapon: %s to socket: %s"),
 				*CurrentWeapon->GetName(), *WeaponAttachSocket.ToString());
 		}
 	}

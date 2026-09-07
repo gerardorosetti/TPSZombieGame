@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Academic Game Architecture. All Rights Reserved.
 
 #include "ZombieGame/Gameplay/WallBuyStation.h"
+#include "ZombieGame/Core/ZombieLog.h"
 #include "ZombieGame/Character/PlayerCharacter.h"
 #include "ZombieGame/Combat/CombatComponent.h"
 #include "ZombieGame/Combat/WeaponBase.h"
@@ -10,6 +11,9 @@
 #include "Components/StaticMeshComponent.h"
 #include "Components/BoxComponent.h"
 #include "Engine/World.h"
+#include "Kismet/GameplayStatics.h"
+#include "Sound/SoundBase.h"
+#include "Sound/SoundAttenuation.h"
 
 AWallBuyStation::AWallBuyStation()
 {
@@ -111,7 +115,16 @@ bool AWallBuyStation::Interact_Implementation(APlayerCharacter* InstigatorPlayer
 	APlayerStateBase* PS = InstigatorPlayer->GetPlayerState<APlayerStateBase>();
 	if (!PS || !PS->SpendPoints(Cost))
 	{
+		if (PurchaseFailSound)
+		{
+			UGameplayStatics::PlaySoundAtLocation(this, PurchaseFailSound, GetActorLocation(), FRotator::ZeroRotator, 1.0f, 1.0f, 0.0f, SpatialAttenuation);
+		}
 		return false;
+	}
+
+	if (PurchaseSuccessSound)
+	{
+		UGameplayStatics::PlaySoundAtLocation(this, PurchaseSuccessSound, GetActorLocation(), FRotator::ZeroRotator, 1.0f, 1.0f, 0.0f, SpatialAttenuation);
 	}
 
 	UWorld* World = GetWorld();
@@ -124,7 +137,7 @@ bool AWallBuyStation::Interact_Implementation(APlayerCharacter* InstigatorPlayer
 			if (AWeaponBase* Weapon = CombatComp->GetCurrentWeapon())
 			{
 				Weapon->RefillAmmo(false, true); // Restock reserve ammo
-				UE_LOG(LogTemp, Log, TEXT("[WallBuy] Restocked reserve ammo for player."));
+				ZOMBIE_LOG(Log, TEXT("[WallBuy] Restocked reserve ammo for player."));
 			}
 		}
 		break;
@@ -135,7 +148,7 @@ bool AWallBuyStation::Interact_Implementation(APlayerCharacter* InstigatorPlayer
 			if (UCombatComponent* CombatComp = InstigatorPlayer->GetCombatComponent())
 			{
 				CombatComp->RefillAllWeaponsAmmo();
-				UE_LOG(LogTemp, Log, TEXT("[WallBuy] Instantly activated Max Ammo for player."));
+				ZOMBIE_LOG(Log, TEXT("[WallBuy] Instantly activated Max Ammo for player."));
 			}
 		}
 		else
@@ -152,7 +165,7 @@ bool AWallBuyStation::Interact_Implementation(APlayerCharacter* InstigatorPlayer
 				if (AZombieGameModeBase* GM = Cast<AZombieGameModeBase>(World->GetAuthGameMode()))
 				{
 					GM->ActivateInstaKill(30.0f);
-					UE_LOG(LogTemp, Log, TEXT("[WallBuy] Instantly activated Insta-Kill mode for 30 seconds."));
+					ZOMBIE_LOG(Log, TEXT("[WallBuy] Instantly activated Insta-Kill mode for 30 seconds."));
 				}
 			}
 		}
@@ -166,7 +179,7 @@ bool AWallBuyStation::Interact_Implementation(APlayerCharacter* InstigatorPlayer
 		if (bActivateImmediately)
 		{
 			PS->ActivateDoublePoints(30.0f);
-			UE_LOG(LogTemp, Log, TEXT("[WallBuy] Instantly activated Double Points for 30 seconds."));
+			ZOMBIE_LOG(Log, TEXT("[WallBuy] Instantly activated Double Points for 30 seconds."));
 		}
 		else
 		{
@@ -182,7 +195,7 @@ bool AWallBuyStation::Interact_Implementation(APlayerCharacter* InstigatorPlayer
 				if (AZombieGameModeBase* GM = Cast<AZombieGameModeBase>(World->GetAuthGameMode()))
 				{
 					GM->TriggerNuke(InstigatorPlayer);
-					UE_LOG(LogTemp, Log, TEXT("[WallBuy] Instantly detonated Nuke."));
+					ZOMBIE_LOG(Log, TEXT("[WallBuy] Instantly detonated Nuke."));
 				}
 			}
 		}
@@ -204,7 +217,7 @@ bool AWallBuyStation::Interact_Implementation(APlayerCharacter* InstigatorPlayer
 				if (APowerUpBase* SpawnedPU = World->SpawnActor<APowerUpBase>(PowerUpClass, SpawnLoc, FRotator::ZeroRotator, SpawnParams))
 				{
 					SpawnedPU->ApplyPowerUpEffect(InstigatorPlayer);
-					UE_LOG(LogTemp, Log, TEXT("[WallBuy] Instantly activated custom power-up effect."));
+					ZOMBIE_LOG(Log, TEXT("[WallBuy] Instantly activated custom power-up effect."));
 				}
 			}
 			else
@@ -235,6 +248,6 @@ void AWallBuyStation::SpawnPowerUpPickup(EPowerUpType InType)
 	if (APowerUpBase* SpawnedPU = World->SpawnActor<APowerUpBase>(ClassToSpawn, SpawnLoc, FRotator::ZeroRotator, SpawnParams))
 	{
 		SpawnedPU->PowerUpType = InType;
-		UE_LOG(LogTemp, Log, TEXT("[WallBuy] Dispensed physical power-up pickup from station."));
+		ZOMBIE_LOG(Log, TEXT("[WallBuy] Dispensed physical power-up pickup from station."));
 	}
 }

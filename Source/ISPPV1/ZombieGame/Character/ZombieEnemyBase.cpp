@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Academic Game Architecture. All Rights Reserved.
 
 #include "ZombieGame/Character/ZombieEnemyBase.h"
+#include "ZombieGame/Core/ZombieLog.h"
 #include "ZombieGame/Character/ZombieHealthComponent.h"
 #include "ZombieGame/AI/ZombieAIController.h"
 #include "Components/CapsuleComponent.h"
@@ -14,6 +15,9 @@
 #include "ZombieGame/Core/PlayerStateBase.h"
 #include "ZombieGame/Character/PlayerCharacter.h"
 #include "ZombieGame/Gameplay/PowerUpBase.h"
+#include "Kismet/GameplayStatics.h"
+#include "Sound/SoundBase.h"
+#include "Sound/SoundAttenuation.h"
 
 AZombieEnemyBase::AZombieEnemyBase()
 {
@@ -108,6 +112,57 @@ void AZombieEnemyBase::BeginPlay()
 	AttackRange = 115.0f;
 	AttackRadius = 40.0f;
 	AttackCooldown = 0.8f;
+
+	ScheduleNextGroan();
+}
+
+void AZombieEnemyBase::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(AttackCooldownTimerHandle);
+		World->GetTimerManager().ClearTimer(GroanTimerHandle);
+	}
+
+	Super::EndPlay(EndPlayReason);
+}
+
+void AZombieEnemyBase::ScheduleNextGroan()
+{
+	if (!IsZombieAlive_Implementation())
+	{
+		return;
+	}
+
+	const float MinVal = FMath::Max(1.0f, MinGroanInterval);
+	const float MaxVal = FMath::Max(MinVal + 0.5f, MaxGroanInterval);
+	const float Interval = FMath::RandRange(MinVal, MaxVal);
+
+	GetWorldTimerManager().SetTimer(GroanTimerHandle, this, &AZombieEnemyBase::PlayAmbientGroan, Interval, false);
+}
+
+void AZombieEnemyBase::PlayAmbientGroan()
+{
+	if (!IsZombieAlive_Implementation())
+	{
+		return;
+	}
+
+	if (GroanSound)
+	{
+		UGameplayStatics::PlaySoundAtLocation(
+			this,
+			GroanSound,
+			GetActorLocation(),
+			FRotator::ZeroRotator,
+			1.0f,
+			1.0f,
+			0.0f,
+			SpatialAttenuation
+		);
+	}
+
+	ScheduleNextGroan();
 }
 
 float AZombieEnemyBase::TakeZombieDamage_Implementation(const FZombieDamageData& DamageData)
@@ -149,10 +204,27 @@ float AZombieEnemyBase::TakeZombieDamage_Implementation(const FZombieDamageData&
 	}
 
 	// Play flinch / hit reaction montage if alive and not currently executing an attack swing
-	if (IsZombieAlive_Implementation() && HitReactMontage && !bIsAttacking)
+	if (IsZombieAlive_Implementation())
 	{
-		const float CurrentGlobalScale = (GetMesh() && GetMesh()->GlobalAnimRateScale > 0.01f) ? GetMesh()->GlobalAnimRateScale : 1.0f;
-		PlayAnimMontage(HitReactMontage, 1.0f / CurrentGlobalScale);
+		if (HurtSound)
+		{
+			UGameplayStatics::PlaySoundAtLocation(
+				this,
+				HurtSound,
+				GetActorLocation(),
+				FRotator::ZeroRotator,
+				1.0f,
+				1.0f,
+				0.0f,
+				SpatialAttenuation
+			);
+		}
+
+		if (HitReactMontage && !bIsAttacking)
+		{
+			const float CurrentGlobalScale = (GetMesh() && GetMesh()->GlobalAnimRateScale > 0.01f) ? GetMesh()->GlobalAnimRateScale : 1.0f;
+			PlayAnimMontage(HitReactMontage, 1.0f / CurrentGlobalScale);
+		}
 	}
 
 	return ActualDamage;
@@ -182,7 +254,25 @@ void AZombieEnemyBase::HandleDeath(AActor* DeadActor, AActor* KillerActor)
 
 	// 3. Clear active timers
 	GetWorldTimerManager().ClearTimer(AttackCooldownTimerHandle);
+	GetWorldTimerManager().ClearTimer(AttackDamageTimerHandle);
+	GetWorldTimerManager().ClearTimer(AttackSwingFinishTimerHandle);
+	GetWorldTimerManager().ClearTimer(GroanTimerHandle);
 	bIsAttacking = false;
+
+	// 3.1 Play 3D death screech
+	if (DeathSound)
+	{
+		UGameplayStatics::PlaySoundAtLocation(
+			this,
+			DeathSound,
+			GetActorLocation(),
+			FRotator::ZeroRotator,
+			1.0f,
+			1.0f,
+			0.0f,
+			SpatialAttenuation
+		);
+	}
 
 	// 4. Award points to the killer (standard: +100 for headshot, +60 for body kill)
 	AController* KillerController = LastDamageReceived.InstigatedBy.IsValid() ? LastDamageReceived.InstigatedBy.Get() : nullptr;
@@ -254,7 +344,7 @@ void AZombieEnemyBase::HandleDeath(AActor* DeadActor, AActor* KillerActor)
 				const FVector DropLocation = GetActorLocation() + FVector(0.0f, 0.0f, 40.0f);
 				GetWorld()->SpawnActor<APowerUpBase>(SelectedPowerUpClass, DropLocation, FRotator::ZeroRotator, SpawnParams);
 
-				UE_LOG(LogTemp, Log, TEXT("[%s] Dropped power-up '%s' (Rolled weight %0.2f / %0.2f)"),
+				ZOMBIE_LOG(Log, TEXT("[%s] Dropped power-up '%s' (Rolled weight %0.2f / %0.2f)"),
 					*GetName(), *SelectedPowerUpClass->GetName(), RolledWeight, TotalWeight);
 			}
 		}
@@ -341,7 +431,7 @@ void AZombieEnemyBase::InitializeZombieRoundStats(int32 RoundNumber)
 			MeshComp->GlobalAnimRateScale = ProportionalAnimRate;
 		}
 
-		UE_LOG(LogTemp, Log, TEXT("[%s] Scaled for Round %d: BaseSpeed=%0.1f -> NewSpeed=%0.1f (%0.2fx), BaseAnimRate=%0.2fx -> NewAnimRate=%0.2fx (Cap=%0.1f, MaxAnimCap=%0.1f)"),
+		ZOMBIE_LOG(Log, TEXT("[%s] Scaled for Round %d: BaseSpeed=%0.1f -> NewSpeed=%0.1f (%0.2fx), BaseAnimRate=%0.2fx -> NewAnimRate=%0.2fx (Cap=%0.1f, MaxAnimCap=%0.1f)"),
 			*GetName(), EffectiveRound, EffectiveBaseSpeed, NewSpeed, SpeedMultiplier, EffectiveBaseAnimRate, ProportionalAnimRate, MaxSpeedCap, MaxAnimRateCap);
 	}
 }
@@ -356,6 +446,23 @@ bool AZombieEnemyBase::CanAttack() const
 	UWorld* World = GetWorld();
 	const bool bCooldownActive = World && World->GetTimerManager().IsTimerActive(AttackCooldownTimerHandle);
 	return IsZombieAlive_Implementation() && !bIsAttacking && !bCooldownActive;
+}
+
+void AZombieEnemyBase::StopAttackAndReset()
+{
+	bIsAttacking = false;
+
+	if (AttackMontage)
+	{
+		StopAnimMontage(AttackMontage);
+	}
+
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(AttackCooldownTimerHandle);
+		World->GetTimerManager().ClearTimer(AttackDamageTimerHandle);
+		World->GetTimerManager().ClearTimer(AttackSwingFinishTimerHandle);
+	}
 }
 
 void AZombieEnemyBase::PerformAttack()
@@ -375,6 +482,16 @@ void AZombieEnemyBase::PerformAttack()
 
 	OnZombieAttack.Broadcast();
 
+	// Play attack vocalization and swipe whoosh with 3D attenuation
+	if (AttackSound)
+	{
+		UGameplayStatics::PlaySoundAtLocation(this, AttackSound, GetActorLocation(), FRotator::ZeroRotator, 1.0f, 1.0f, 0.0f, SpatialAttenuation);
+	}
+	if (AttackWhooshSound)
+	{
+		UGameplayStatics::PlaySoundAtLocation(this, AttackWhooshSound, GetActorLocation(), FRotator::ZeroRotator, 1.0f, 1.0f, 0.0f, SpatialAttenuation);
+	}
+
 	float AttackAnimDuration = 1.2f;
 	if (AttackMontage)
 	{
@@ -386,9 +503,8 @@ void AZombieEnemyBase::PerformAttack()
 
 	// Schedule damage delivery mid-swing when attack reaches apex
 	const float DamageDelay = AttackAnimDuration * FMath::Clamp(AttackDamageFraction, 0.1f, 0.9f);
-	FTimerHandle DamageTimerHandle;
 	GetWorldTimerManager().SetTimer(
-		DamageTimerHandle,
+		AttackDamageTimerHandle,
 		this,
 		&AZombieEnemyBase::ApplyMeleeDamage,
 		DamageDelay,
@@ -396,9 +512,8 @@ void AZombieEnemyBase::PerformAttack()
 	);
 
 	// Reset bIsAttacking as soon as the swing montage finishes
-	FTimerHandle SwingFinishTimerHandle;
 	GetWorldTimerManager().SetTimer(
-		SwingFinishTimerHandle,
+		AttackSwingFinishTimerHandle,
 		[this]()
 		{
 			bIsAttacking = false;
@@ -456,6 +571,12 @@ void AZombieEnemyBase::ApplyMeleeDamage()
 			// STRICT FILTER: Zero friendly fire! Only damage APlayerCharacter, never fellow zombies or power-ups!
 			if (TargetActor && TargetActor != this && TargetActor->IsA<APlayerCharacter>() && TargetActor->Implements<UZombieDamageableInterface>())
 			{
+				// Target must be alive: Never hit or damage dead player corpses!
+				if (!IZombieDamageableInterface::Execute_IsZombieAlive(TargetActor))
+				{
+					continue;
+				}
+
 				FZombieDamageData DamageData;
 				DamageData.BaseDamage = AttackDamage;
 				DamageData.HitLocation = Hit.ImpactPoint;
@@ -466,7 +587,7 @@ void AZombieEnemyBase::ApplyMeleeDamage()
 				DamageData.bIsHeadshot = false;
 
 				const float DealtDamage = IZombieDamageableInterface::Execute_TakeZombieDamage(TargetActor, DamageData);
-				UE_LOG(LogTemp, Log, TEXT("[%s] Melee hit player %s for %f damage!"),
+				ZOMBIE_LOG(Log, TEXT("[%s] Melee hit player %s for %f damage!"),
 					*GetName(), *TargetActor->GetName(), DealtDamage);
 				break; // Deliver damage to player once per swing
 			}

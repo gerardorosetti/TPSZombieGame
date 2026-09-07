@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Academic Game Architecture. All Rights Reserved.
 
 #include "ZombieGame/Character/BaseCharacter.h"
+#include "ZombieGame/Core/ZombieLog.h"
 #include "ZombieGame/Character/ZombieHealthComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/SkeletalMeshComponent.h"
@@ -36,13 +37,13 @@ void ABaseCharacter::BeginPlay()
 void ABaseCharacter::HandleHealthChanged(float CurrentHealth, float MaxHealth, float HealthDelta, const FZombieDamageData& DamageData)
 {
 	// Verbose logging for gameplay inspection
-	UE_LOG(LogTemp, Verbose, TEXT("[%s] Health Changed: %f/%f (Delta: %f)"),
+	ZOMBIE_LOG(Verbose, TEXT("[%s] Health Changed: %f/%f (Delta: %f)"),
 		*GetName(), CurrentHealth, MaxHealth, HealthDelta);
 }
 
 void ABaseCharacter::HandleDeath(AActor* DeadActor, AActor* KillerActor)
 {
-	UE_LOG(LogTemp, Log, TEXT("[%s] Died. Killer: %s"), *GetName(), KillerActor ? *KillerActor->GetName() : TEXT("Environment"));
+	ZOMBIE_LOG(Log, TEXT("[%s] Died. Killer: %s"), *GetName(), KillerActor ? *KillerActor->GetName() : TEXT("Environment"));
 
 	// 1. Disable Capsule Component to stop blocking navigation and other players
 	if (UCapsuleComponent* CapsuleComp = GetCapsuleComponent())

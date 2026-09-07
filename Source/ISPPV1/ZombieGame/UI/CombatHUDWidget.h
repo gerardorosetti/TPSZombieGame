@@ -32,6 +32,7 @@ public:
 
 protected:
 	virtual void NativeConstruct() override;
+	virtual void NativeDestruct() override;
 	virtual void NativeTick(const FGeometry& MyGeometry, float InDeltaTime) override;
 
 	// ----------------------------------------------------------------------------------
@@ -153,9 +154,17 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="HUD|Damage")
 	float DamageFadeSpeed = 4.0f;
 
-	/** If true, shows 2D UI hitmarker on bullet hit. Defaults to false. */
+	/** Sound played when bullet strikes body. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="HUD|Audio")
+	TObjectPtr<class USoundBase> HitmarkerSound;
+
+	/** Sound played on critical headshot elimination / bullet impact. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="HUD|Audio")
+	TObjectPtr<class USoundBase> HeadshotHitmarkerSound;
+
+	/** If true, shows 2D UI hitmarker on bullet hit. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="HUD|Crosshair")
-	bool bEnableHitmarkers = false;
+	bool bEnableHitmarkers = true;
 
 	/** Duration in seconds that hitmarker stays on screen. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="HUD|Crosshair")

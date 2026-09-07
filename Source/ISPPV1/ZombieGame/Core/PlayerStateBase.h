@@ -24,6 +24,8 @@ class ISPPV1_API APlayerStateBase : public APlayerState
 public:
 	APlayerStateBase();
 
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+
 protected:
 	/** Current spendable points (currency for doors, wall buys, power-ups). Starting points: 500. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Economy")

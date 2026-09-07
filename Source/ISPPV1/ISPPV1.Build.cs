@@ -20,7 +20,8 @@ public class ISPPV1 : ModuleRules
 			"GameplayStateTreeModule",
 			"UMG",
 			"Slate",
-			"SlateCore"
+			"SlateCore",
+			"Niagara"
 		});
 
 		PrivateDependencyModuleNames.AddRange(new string[] { });
