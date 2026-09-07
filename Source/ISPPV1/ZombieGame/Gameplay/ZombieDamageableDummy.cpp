@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Academic Game Architecture. All Rights Reserved.
 
 #include "ZombieGame/Gameplay/ZombieDamageableDummy.h"
+#include "ZombieGame/Core/ZombieLog.h"
 #include "ZombieGame/Character/ZombieHealthComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "UObject/ConstructorHelpers.h"
@@ -43,7 +44,7 @@ void AZombieDamageableDummy::BeginPlay()
 
 void AZombieDamageableDummy::HandleHealthChanged(float CurrentHealth, float MaxHealth, float HealthDelta, const FZombieDamageData& DamageData)
 {
-	UE_LOG(LogTemp, Log, TEXT("[Dummy Target] Hit registered! Delta: %f | Current Health: %f/%f (Headshot: %s)"),
+	ZOMBIE_LOG(Log, TEXT("[Dummy Target] Hit registered! Delta: %f | Current Health: %f/%f (Headshot: %s)"),
 		HealthDelta, CurrentHealth, MaxHealth, DamageData.bIsHeadshot ? TEXT("YES") : TEXT("NO"));
 
 	// Quick visual feedback: slight impulse or bounce (only if physics is actively simulated)
@@ -55,7 +56,7 @@ void AZombieDamageableDummy::HandleHealthChanged(float CurrentHealth, float MaxH
 
 void AZombieDamageableDummy::HandleDeath(AActor* DeadActor, AActor* KillerActor)
 {
-	UE_LOG(LogTemp, Warning, TEXT("[Dummy Target] DESTROYED by: %s"), KillerActor ? *KillerActor->GetName() : TEXT("Unknown"));
+	ZOMBIE_LOG(Warning, TEXT("[Dummy Target] DESTROYED by: %s"), KillerActor ? *KillerActor->GetName() : TEXT("Unknown"));
 
 	// Enable physics to collapse on death
 	if (MeshComponent)

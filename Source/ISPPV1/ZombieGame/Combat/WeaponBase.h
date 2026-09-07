@@ -12,6 +12,11 @@ class USkeletalMeshComponent;
 class UStaticMeshComponent;
 class ACharacter;
 class ADroppedMagazine;
+class USoundBase;
+class USoundAttenuation;
+class UNiagaraSystem;
+class UCameraShakeBase;
+class UMaterialInterface;
 
 /**
  * Firing mode of a weapon.
@@ -103,6 +108,7 @@ public:
 
 protected:
 	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 	virtual void Tick(float DeltaTime) override;
 
 	// ----------------------------------------------------------------------------------
@@ -236,6 +242,74 @@ protected:
 	/** Anim montage to play on the character when this weapon reloads. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Weapon|Animation")
 	TObjectPtr<class UAnimMontage> ReloadMontage;
+
+	// ----------------------------------------------------------------------------------
+	// Audio, Camera Shake & Visual Effects (Sensory Feedback)
+	// ----------------------------------------------------------------------------------
+
+	/** Spatial attenuation asset applied to 3D weapon and impact audio. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Weapon|Audio")
+	TObjectPtr<USoundAttenuation> SpatialAttenuation;
+
+	/** Gunshot sound played at the weapon's muzzle. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Weapon|Audio")
+	TObjectPtr<USoundBase> FireSound;
+
+	/** Dry fire click played when attempting to fire with empty magazine. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Weapon|Audio")
+	TObjectPtr<USoundBase> DryFireSound;
+
+	/** Sound played when magazine is detached during reload. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Weapon|Audio")
+	TObjectPtr<USoundBase> MagOutSound;
+
+	/** Sound played when fresh magazine is locked into place during reload. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Weapon|Audio")
+	TObjectPtr<USoundBase> MagInSound;
+
+	/** Sound played at impact location when bullet hits flesh/living character. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Weapon|Audio")
+	TObjectPtr<USoundBase> FleshImpactSound;
+
+	/** Optional distinct fleshy crunch/pop played when a bullet strikes a zombie head. Falls back to FleshImpactSound if unassigned. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Weapon|Audio")
+	TObjectPtr<USoundBase> HeadshotFleshImpactSound;
+
+	/** Sound played at impact location when bullet hits world environment geometry. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Weapon|Audio")
+	TObjectPtr<USoundBase> WorldImpactSound;
+
+	/** Procedural camera shake played on the player controller when firing. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Weapon|Effects")
+	TSubclassOf<UCameraShakeBase> FireCameraShakeClass;
+
+	/** Niagara system spawned at muzzle socket when firing. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Weapon|Effects")
+	TObjectPtr<UNiagaraSystem> MuzzleFlashFX;
+
+	/** Niagara tracer beam spawned from muzzle to bullet impact/end point. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Weapon|Effects")
+	TObjectPtr<UNiagaraSystem> TracerFX;
+
+	/** Niagara blood splash spawned at hit location on flesh targets. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Weapon|Effects")
+	TObjectPtr<UNiagaraSystem> FleshImpactFX;
+
+	/** Niagara dust/sparks spawned at hit location on environment surfaces. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Weapon|Effects")
+	TObjectPtr<UNiagaraSystem> WorldImpactFX;
+
+	/** Decal material projected onto environment surfaces at impact point. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Weapon|Effects")
+	TObjectPtr<UMaterialInterface> BulletHoleDecal;
+
+	/** Size of bullet hole decal. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Weapon|Effects")
+	FVector BulletHoleDecalSize = FVector(8.0f, 8.0f, 8.0f);
+
+	/** Enables visual debug line and sphere rendering during firing. Defaults to false for production. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Weapon|Debug")
+	bool bEnableDebugTraces = false;
 
 	// Timer handles for firing cadence and reload
 	FTimerHandle FireTimerHandle;

@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Academic Game Architecture. All Rights Reserved.
 
 #include "ZombieGame/Character/PlayerCharacter.h"
+#include "ZombieGame/Core/ZombieLog.h"
 #include "ZombieGame/Combat/CombatComponent.h"
 #include "GameFramework/SpringArmComponent.h"
 #include "Camera/CameraComponent.h"
@@ -19,6 +20,10 @@
 #include "ZombieGame/Character/ZombieHealthComponent.h"
 #include "ZombieGame/Core/ZombieGameModeBase.h"
 #include "ZombieGame/UI/CombatHUDWidget.h"
+#include "Camera/CameraShakeBase.h"
+#include "Kismet/GameplayStatics.h"
+#include "Sound/SoundBase.h"
+#include "Components/AudioComponent.h"
 
 APlayerCharacter::APlayerCharacter()
 {
@@ -76,10 +81,31 @@ APlayerCharacter::APlayerCharacter()
 	}
 }
 
+void APlayerCharacter::RestorePlayerControl()
+{
+	if (APlayerController* PC = Cast<APlayerController>(GetController()))
+	{
+		FInputModeGameOnly InputMode;
+		PC->SetInputMode(InputMode);
+		PC->bShowMouseCursor = false;
+		PC->SetIgnoreMoveInput(false);
+		PC->SetIgnoreLookInput(false);
+		EnableInput(PC);
+	}
+}
+
+void APlayerCharacter::PossessedBy(AController* NewController)
+{
+	Super::PossessedBy(NewController);
+	RegisterInputMappingContext();
+	RestorePlayerControl();
+}
+
 void APlayerCharacter::BeginPlay()
 {
 	Super::BeginPlay();
 	RegisterInputMappingContext();
+	RestorePlayerControl();
 
 	if (StimuliSourceComponent)
 	{
@@ -109,7 +135,7 @@ void APlayerCharacter::BeginPlay()
 				if (FallbackHUD)
 				{
 					FallbackHUD->AddToViewport(0);
-					UE_LOG(LogTemp, Log, TEXT("[PlayerCharacter] Mounted Combat HUD to viewport."));
+					ZOMBIE_LOG(Log, TEXT("[PlayerCharacter] Mounted Combat HUD to viewport."));
 				}
 			}
 		}
@@ -120,6 +146,7 @@ void APlayerCharacter::PawnClientRestart()
 {
 	Super::PawnClientRestart();
 	RegisterInputMappingContext();
+	RestorePlayerControl();
 }
 
 void APlayerCharacter::RegisterInputMappingContext()
@@ -283,5 +310,123 @@ void APlayerCharacter::Interact()
 	{
 		InteractionComponent->TryInteract();
 	}
+}
+
+void APlayerCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	if (LowHealthAudioComponent && LowHealthAudioComponent->IsPlaying())
+	{
+		LowHealthAudioComponent->Stop();
+	}
+
+	Super::EndPlay(EndPlayReason);
+}
+
+void APlayerCharacter::HandleHealthChanged(float CurrentHealth, float MaxHealth, float HealthDelta, const FZombieDamageData& DamageData)
+{
+	Super::HandleHealthChanged(CurrentHealth, MaxHealth, HealthDelta, DamageData);
+
+	if (HealthDelta < 0.0f)
+	{
+		// 1. Play jarring damage camera shake to alert player
+		if (DamageCameraShakeClass)
+		{
+			if (APlayerController* PC = Cast<APlayerController>(GetController()))
+			{
+				PC->ClientStartCameraShake(DamageCameraShakeClass);
+			}
+		}
+
+		// 2. Play 2D hurt audio feedback
+		if (HurtSound)
+		{
+			UGameplayStatics::PlaySound2D(this, HurtSound);
+		}
+	}
+
+	// 3. Low Health Audio System (Danger heartbeat, enter and exit cues)
+	if (MaxHealth > 0.0f)
+	{
+		const float HealthRatio = CurrentHealth / MaxHealth;
+		const bool bShouldBeLowHealth = (HealthRatio <= LowHealthThreshold && CurrentHealth > 0.0f);
+
+		if (bShouldBeLowHealth && !bIsLowHealth)
+		{
+			bIsLowHealth = true;
+
+			// Play low health entry stinger (initial danger alert)
+			if (LowHealthEnterSound)
+			{
+				UGameplayStatics::PlaySound2D(this, LowHealthEnterSound);
+			}
+
+			// Start looping heartbeat/tension audio
+			if (LowHealthLoopSound)
+			{
+				if (!LowHealthAudioComponent)
+				{
+					LowHealthAudioComponent = UGameplayStatics::SpawnSound2D(this, LowHealthLoopSound, 1.0f, 1.0f, 0.0f, nullptr, true);
+				}
+				else
+				{
+					LowHealthAudioComponent->SetSound(LowHealthLoopSound);
+					LowHealthAudioComponent->Play();
+				}
+			}
+		}
+		else if (!bShouldBeLowHealth && bIsLowHealth)
+		{
+			bIsLowHealth = false;
+
+			// Stop looping danger heartbeat
+			if (LowHealthAudioComponent && LowHealthAudioComponent->IsPlaying())
+			{
+				LowHealthAudioComponent->Stop();
+			}
+
+			// Play recovery / danger exit sound
+			if (LowHealthExitSound && CurrentHealth > 0.0f)
+			{
+				UGameplayStatics::PlaySound2D(this, LowHealthExitSound);
+			}
+		}
+	}
+}
+
+void APlayerCharacter::OnDeathStarted(AActor* Killer)
+{
+	// 1. Stop low health heartbeat audio immediately on death
+	if (LowHealthAudioComponent && LowHealthAudioComponent->IsPlaying())
+	{
+		LowHealthAudioComponent->Stop();
+	}
+	bIsLowHealth = false;
+
+	// 2. Play death sound
+	if (DeathSound)
+	{
+		UGameplayStatics::PlaySound2D(this, DeathSound);
+	}
+
+	// 3. Stop active weapon firing
+	if (CombatComponent)
+	{
+		CombatComponent->StopFire();
+	}
+
+	// 4. Disable Enhanced Input Mapping Context
+	if (APlayerController* PC = Cast<APlayerController>(GetController()))
+	{
+		if (UEnhancedInputLocalPlayerSubsystem* Subsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(PC->GetLocalPlayer()))
+		{
+			if (DefaultMappingContext)
+			{
+				Subsystem->RemoveMappingContext(DefaultMappingContext);
+			}
+		}
+	}
+
+	// Preserve ragdoll corpse for Game Over view
+	SetLifeSpan(0.0f);
 }
 

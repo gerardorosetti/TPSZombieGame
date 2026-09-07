@@ -89,6 +89,22 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="WallBuy|Config")
 	bool bActivateImmediately = true;
 
+	// ----------------------------------------------------------------------------------
+	// Audio & Spatial Feedback
+	// ----------------------------------------------------------------------------------
+
+	/** Spatial attenuation asset for 3D station audio. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="WallBuy|Audio")
+	TObjectPtr<class USoundAttenuation> SpatialAttenuation;
+
+	/** Sound played when purchase succeeds (cash register, chime). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="WallBuy|Audio")
+	TObjectPtr<class USoundBase> PurchaseSuccessSound;
+
+	/** Sound played when purchase fails due to insufficient funds (buzz, error). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="WallBuy|Audio")
+	TObjectPtr<class USoundBase> PurchaseFailSound;
+
 protected:
 	/** Helper to instantiate a physical 3D pickup actor in front of the station. */
 	void SpawnPowerUpPickup(EPowerUpType InType);

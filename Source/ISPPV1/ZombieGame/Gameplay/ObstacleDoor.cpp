@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Academic Game Architecture. All Rights Reserved.
 
 #include "ZombieGame/Gameplay/ObstacleDoor.h"
+#include "ZombieGame/Core/ZombieLog.h"
 #include "ZombieGame/Character/PlayerCharacter.h"
 #include "ZombieGame/Core/PlayerStateBase.h"
 #include "ZombieGame/Gameplay/ZombieSpawnPoint.h"
@@ -10,6 +11,9 @@
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "NavigationSystem.h"
+#include "Kismet/GameplayStatics.h"
+#include "Sound/SoundBase.h"
+#include "Sound/SoundAttenuation.h"
 
 AObstacleDoor::AObstacleDoor()
 {
@@ -109,6 +113,20 @@ void AObstacleDoor::OpenDoor(APlayerCharacter* InstigatorPlayer)
 
 	bIsOpened = true;
 
+	if (DoorOpenSound)
+	{
+		UGameplayStatics::PlaySoundAtLocation(
+			this,
+			DoorOpenSound,
+			GetActorLocation(),
+			FRotator::ZeroRotator,
+			1.0f,
+			1.0f,
+			0.0f,
+			SpatialAttenuation
+		);
+	}
+
 	// 1. Calculate combined bounding box of all barrier components BEFORE disabling collision/hiding
 	const FBox TotalDirtyBounds = GetComponentsBoundingBox(true).ExpandBy(300.0f);
 
@@ -165,7 +183,7 @@ void AObstacleDoor::OpenDoor(APlayerCharacter* InstigatorPlayer)
 					ActivatedCount++;
 				}
 			}
-			UE_LOG(LogTemp, Log, TEXT("[ObstacleDoor] Unlocked zone '%s' - activated %d spawn points."),
+			ZOMBIE_LOG(Log, TEXT("[ObstacleDoor] Unlocked zone '%s' - activated %d spawn points."),
 				*ZoneToUnlock.ToString(), ActivatedCount);
 		}
 	}

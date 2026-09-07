@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Academic Game Architecture. All Rights Reserved.
 
 #include "ZombieGame/Core/PlayerStateBase.h"
+#include "ZombieGame/Core/ZombieLog.h"
 #include "TimerManager.h"
 #include "Engine/World.h"
 
@@ -12,6 +13,16 @@ APlayerStateBase::APlayerStateBase()
 	TotalHeadshots = 0;
 	RoundsSurvived = 0;
 	bIsDoublePointsActive = false;
+}
+
+void APlayerStateBase::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(DoublePointsTimerHandle);
+	}
+
+	Super::EndPlay(EndPlayReason);
 }
 
 void APlayerStateBase::AddPoints(int32 Amount)
@@ -30,7 +41,7 @@ void APlayerStateBase::AddPoints(int32 Amount)
 	TotalScoreEarned += Amount;
 
 	OnPointsChanged.Broadcast(CurrentPoints, Amount);
-	UE_LOG(LogTemp, Verbose, TEXT("[%s] +%d Points (Total: %d, DoublePoints=%s)"),
+	ZOMBIE_LOG(Verbose, TEXT("[%s] +%d Points (Total: %d, DoublePoints=%s)"),
 		*GetName(), Amount, CurrentPoints, bIsDoublePointsActive ? TEXT("TRUE") : TEXT("FALSE"));
 }
 
@@ -52,7 +63,7 @@ void APlayerStateBase::ActivateDoublePoints(float Duration)
 	}
 
 	OnDoublePointsStateChanged.Broadcast(true, Duration);
-	UE_LOG(LogTemp, Log, TEXT("[%s] Double Points activated/reset for %f seconds!"), *GetName(), Duration);
+	ZOMBIE_LOG(Log, TEXT("[%s] Double Points activated/reset for %f seconds!"), *GetName(), Duration);
 }
 
 void APlayerStateBase::DeactivateDoublePoints()
@@ -64,7 +75,7 @@ void APlayerStateBase::DeactivateDoublePoints()
 	}
 
 	OnDoublePointsStateChanged.Broadcast(false, 0.0f);
-	UE_LOG(LogTemp, Log, TEXT("[%s] Double Points expired."), *GetName());
+	ZOMBIE_LOG(Log, TEXT("[%s] Double Points expired."), *GetName());
 }
 
 float APlayerStateBase::GetDoublePointsTimeRemaining() const
@@ -91,13 +102,13 @@ bool APlayerStateBase::SpendPoints(int32 Amount)
 
 	if (CurrentPoints < Amount)
 	{
-		UE_LOG(LogTemp, Log, TEXT("[%s] Insufficient points to spend %d (Have: %d)"), *GetName(), Amount, CurrentPoints);
+		ZOMBIE_LOG(Log, TEXT("[%s] Insufficient points to spend %d (Have: %d)"), *GetName(), Amount, CurrentPoints);
 		return false;
 	}
 
 	CurrentPoints -= Amount;
 	OnPointsChanged.Broadcast(CurrentPoints, -Amount);
-	UE_LOG(LogTemp, Log, TEXT("[%s] Spent %d points (Remaining: %d)"), *GetName(), Amount, CurrentPoints);
+	ZOMBIE_LOG(Log, TEXT("[%s] Spent %d points (Remaining: %d)"), *GetName(), Amount, CurrentPoints);
 	return true;
 }
 

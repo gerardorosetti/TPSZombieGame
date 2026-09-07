@@ -8,6 +8,8 @@
 
 class UAnimMontage;
 class AZombieAIController;
+class USoundBase;
+class USoundAttenuation;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnZombieDeathDelegate, AZombieEnemyBase*, DeadZombie);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnZombieAttackDelegate);
@@ -42,6 +44,7 @@ public:
 
 protected:
 	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 	// ----------------------------------------------------------------------------------
 	// Combat & Attack Configuration
@@ -146,6 +149,47 @@ protected:
 	TObjectPtr<UAnimMontage> HitReactMontage;
 
 	// ----------------------------------------------------------------------------------
+	// Audio & Spatial Sound (3D Attenuation)
+	// ----------------------------------------------------------------------------------
+
+	/** Spatial attenuation asset applied to 3D zombie vocalizations. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Zombie|Audio")
+	TObjectPtr<USoundAttenuation> SpatialAttenuation;
+
+	/** Ambient groaning sound played periodically. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Zombie|Audio")
+	TObjectPtr<USoundBase> GroanSound;
+
+	/** Attack roar played when initiating a melee attack. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Zombie|Audio")
+	TObjectPtr<USoundBase> AttackSound;
+
+	/** Melee attack swipe whoosh sound. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Zombie|Audio")
+	TObjectPtr<USoundBase> AttackWhooshSound;
+
+	/** Hurt sound played when taking damage. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Zombie|Audio")
+	TObjectPtr<USoundBase> HurtSound;
+
+	/** Death screech/groan played when eliminated. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Zombie|Audio")
+	TObjectPtr<USoundBase> DeathSound;
+
+	/** Min seconds between random ambient groans. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Zombie|Audio", meta=(ClampMin="1.0"))
+	float MinGroanInterval = 4.0f;
+
+	/** Max seconds between random ambient groans. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Zombie|Audio", meta=(ClampMin="2.0"))
+	float MaxGroanInterval = 12.0f;
+
+	FTimerHandle GroanTimerHandle;
+
+	void ScheduleNextGroan();
+	void PlayAmbientGroan();
+
+	// ----------------------------------------------------------------------------------
 	// State Tracking
 	// ----------------------------------------------------------------------------------
 
@@ -157,6 +201,8 @@ protected:
 	FZombieDamageData LastDamageReceived;
 
 	FTimerHandle AttackCooldownTimerHandle;
+	FTimerHandle AttackDamageTimerHandle;
+	FTimerHandle AttackSwingFinishTimerHandle;
 
 public:
 	// ----------------------------------------------------------------------------------
@@ -184,6 +230,10 @@ public:
 	/** Returns true if the zombie is alive, not attacking, and cooldown has elapsed. */
 	UFUNCTION(BlueprintPure, Category="Zombie|Combat")
 	virtual bool CanAttack() const;
+
+	/** Aborts active attack swing, clears montage, and resets attack state (e.g. when player dies). */
+	UFUNCTION(BlueprintCallable, Category="Zombie|Combat")
+	virtual void StopAttackAndReset();
 
 	/**
 	 * Dynamically scales health, speed, and attributes based on wave number.

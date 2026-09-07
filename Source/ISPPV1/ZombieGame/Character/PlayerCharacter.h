@@ -13,6 +13,9 @@ class UInputAction;
 class UCombatComponent;
 class UInteractionComponent;
 class UCombatHUDWidget;
+class USoundBase;
+class UAudioComponent;
+class UCameraShakeBase;
 struct FInputActionValue;
 
 /**
@@ -30,6 +33,12 @@ class ISPPV1_API APlayerCharacter : public ABaseCharacter
 
 public:
 	APlayerCharacter();
+
+	/** Restores GameOnly input mode, reenables pawn input, and hides mouse cursor. */
+	UFUNCTION(BlueprintCallable, Category="Zombie|Input")
+	void RestorePlayerControl();
+
+	virtual void PossessedBy(AController* NewController) override;
 
 protected:
 	virtual void BeginPlay() override;
@@ -111,6 +120,52 @@ protected:
 	/** Combat HUD widget class to instantiate. Can be assigned in BP_PlayerCharacter. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="UI")
 	TSubclassOf<UCombatHUDWidget> HUDWidgetClass;
+
+	// ----------------------------------------------------------------------------------
+	// Feedback, Effects & Audio
+	// ----------------------------------------------------------------------------------
+
+	/** Camera shake triggered when player takes damage. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Player|Effects")
+	TSubclassOf<UCameraShakeBase> DamageCameraShakeClass;
+
+	/** Sound played when player takes damage. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Player|Audio")
+	TObjectPtr<USoundBase> HurtSound;
+
+	/** Sound played when player is eliminated. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Player|Audio")
+	TObjectPtr<USoundBase> DeathSound;
+
+	// ----------------------------------------------------------------------------------
+	// Low Health Audio System
+	// ----------------------------------------------------------------------------------
+
+	/** Health ratio threshold (0.0 - 1.0) below which the character enters critical low-health danger state. Defaults to 0.40 (40%). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Player|Audio", meta=(ClampMin="0.1", ClampMax="0.9"))
+	float LowHealthThreshold = 0.40f;
+
+	/** Stinger sound played once when health drops into the critical red danger threshold. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Player|Audio")
+	TObjectPtr<USoundBase> LowHealthEnterSound;
+
+	/** Looping audio (heartbeat, heavy breathing) played continuously while health remains in danger. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Player|Audio")
+	TObjectPtr<USoundBase> LowHealthLoopSound;
+
+	/** Sound played when health recovers and exits the danger threshold. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Player|Audio")
+	TObjectPtr<USoundBase> LowHealthExitSound;
+
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category="Player|Audio")
+	bool bIsLowHealth = false;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UAudioComponent> LowHealthAudioComponent;
+
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+	virtual void HandleHealthChanged(float CurrentHealth, float MaxHealth, float HealthDelta, const FZombieDamageData& DamageData) override;
+	virtual void OnDeathStarted(AActor* Killer) override;
 
 	// ----------------------------------------------------------------------------------
 	// Input Handlers

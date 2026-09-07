@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Academic Game Architecture. All Rights Reserved.
 
 #include "ZombieGame/Gameplay/ZombieSpawnPoint.h"
+#include "ZombieGame/Core/ZombieLog.h"
 #include "ZombieGame/Gameplay/ZombieWaveManager.h"
 #include "NavigationSystem.h"
 #include "Components/SceneComponent.h"
@@ -79,7 +80,7 @@ void AZombieSpawnPoint::BeginPlay()
 		}
 	}
 
-	UE_LOG(LogTemp, Log, TEXT("[ZombieSpawnPoint] Spawner '%s' (Zone: '%s') initialized. bIsDormant=%s, bHasZone=%s -> Active=%s"),
+	ZOMBIE_LOG(Log, TEXT("[ZombieSpawnPoint] Spawner '%s' (Zone: '%s') initialized. bIsDormant=%s, bHasZone=%s -> Active=%s"),
 		*GetName(), *ZoneName.ToString(),
 		bIsDormant ? TEXT("TRUE") : TEXT("FALSE"),
 		bHasZone ? TEXT("TRUE") : TEXT("FALSE"),

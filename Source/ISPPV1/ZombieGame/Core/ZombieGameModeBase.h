@@ -8,7 +8,10 @@
 
 class AZombieWaveManager;
 class UCombatHUDWidget;
+class UGameOverWidget;
 class APlayerCharacter;
+class USoundBase;
+enum class EWaveState : uint8;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnInstaKillStateChangedSignature, bool, bIsActive, float, Duration);
 
@@ -26,6 +29,8 @@ public:
 
 protected:
 	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+	virtual void RestartPlayer(AController* NewPlayer) override;
 
 	/** Wave manager class to spawn if none exists in the level. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Zombie|Waves")
@@ -42,6 +47,30 @@ protected:
 	/** Active HUD widget instance displayed in the viewport. */
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category="Zombie|UI")
 	TObjectPtr<UCombatHUDWidget> ActiveHUDWidget;
+
+	/** Game Over widget class instantiated upon player elimination. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Zombie|UI")
+	TSubclassOf<UGameOverWidget> GameOverWidgetClass;
+
+	/** Active Game Over widget instance displayed in the viewport. */
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category="Zombie|UI")
+	TObjectPtr<UGameOverWidget> ActiveGameOverWidget;
+
+	// ----------------------------------------------------------------------------------
+	// Match Audio
+	// ----------------------------------------------------------------------------------
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Zombie|Audio")
+	TObjectPtr<USoundBase> RoundStartSound;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Zombie|Audio")
+	TObjectPtr<USoundBase> RoundEndSound;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Zombie|Audio")
+	TObjectPtr<USoundBase> NukeDetonationSound;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Zombie|Audio")
+	TObjectPtr<USoundBase> GameOverSound;
 
 	// ----------------------------------------------------------------------------------
 	// Power-Up Match State (Insta-Kill)
@@ -94,4 +123,11 @@ public:
 	/** Handles player death to trigger the Game Over sequence. */
 	UFUNCTION()
 	void HandlePlayerDeath(AActor* DeadActor, AActor* KillerActor);
+
+protected:
+	UFUNCTION()
+	void HandleWaveStarted(int32 WaveNumber);
+
+	UFUNCTION()
+	void HandleWaveStateChanged(EWaveState NewState);
 };

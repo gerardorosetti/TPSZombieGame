@@ -102,6 +102,10 @@ public:
 	UFUNCTION(BlueprintCallable, Category="AI|Combat")
 	void NotifyDamageReceived(AActor* Attacker);
 
+	/** Notified when the target player dies so this zombie immediately stops attacking and returns to wander. */
+	UFUNCTION(BlueprintCallable, Category="AI|Combat")
+	void NotifyPlayerDied(AActor* DeadPlayer);
+
 	/** Forces an immediate path re-evaluation toward target (e.g. when an obstacle door opens). */
 	UFUNCTION(BlueprintCallable, Category="AI|Navigation")
 	void ForceRepath();

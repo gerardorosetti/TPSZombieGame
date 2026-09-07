@@ -1,7 +1,9 @@
 // Copyright (c) 2026 Academic Game Architecture. All Rights Reserved.
 
 #include "ZombieGame/AI/ZombieAIController.h"
+#include "ZombieGame/Core/ZombieLog.h"
 #include "ZombieGame/Character/ZombieEnemyBase.h"
+#include "ZombieGame/Interfaces/ZombieDamageableInterface.h"
 #include "Perception/AIPerceptionComponent.h"
 #include "Perception/AISenseConfig_Sight.h"
 #include "Perception/AISenseConfig_Damage.h"
@@ -72,6 +74,11 @@ void AZombieAIController::OnPossess(APawn* InPawn)
 
 void AZombieAIController::OnUnPossess()
 {
+	if (AIPerceptionComponent)
+	{
+		AIPerceptionComponent->OnTargetPerceptionUpdated.RemoveDynamic(this, &AZombieAIController::HandleTargetPerceptionUpdated);
+	}
+
 	GetWorldTimerManager().ClearTimer(WanderTimerHandle);
 	StopMovement();
 
@@ -188,8 +195,11 @@ void AZombieAIController::SetAIState(EZombieAIState NewState)
 
 void AZombieAIController::UpdateChaseLogic()
 {
-	if (!TargetActor.IsValid() || !ControlledZombie.IsValid())
+	const bool bTargetIsAlive = TargetActor.IsValid() && (!TargetActor->Implements<UZombieDamageableInterface>() || IZombieDamageableInterface::Execute_IsZombieAlive(TargetActor.Get()));
+	if (!bTargetIsAlive || !ControlledZombie.IsValid())
 	{
+		TargetActor = nullptr;
+		StopMovement();
 		SetAIState(EZombieAIState::Wander);
 		return;
 	}
@@ -252,8 +262,15 @@ void AZombieAIController::ForceRepath()
 
 void AZombieAIController::UpdateAttackLogic()
 {
-	if (!TargetActor.IsValid() || !ControlledZombie.IsValid())
+	const bool bTargetIsAlive = TargetActor.IsValid() && (!TargetActor->Implements<UZombieDamageableInterface>() || IZombieDamageableInterface::Execute_IsZombieAlive(TargetActor.Get()));
+	if (!bTargetIsAlive || !ControlledZombie.IsValid())
 	{
+		if (ControlledZombie.IsValid())
+		{
+			ControlledZombie->StopAttackAndReset();
+		}
+		TargetActor = nullptr;
+		StopMovement();
 		SetAIState(EZombieAIState::Wander);
 		return;
 	}
@@ -307,8 +324,22 @@ void AZombieAIController::NotifyDamageReceived(AActor* Attacker)
 		{
 			TargetActor = Attacker;
 			SetAIState(EZombieAIState::Chase);
-			UE_LOG(LogTemp, Log, TEXT("[%s] Aggroed by damage from player %s!"), *GetName(), *Attacker->GetName());
+			ZOMBIE_LOG(Log, TEXT("[%s] Aggroed by damage from player %s!"), *GetName(), *Attacker->GetName());
 		}
+	}
+}
+
+void AZombieAIController::NotifyPlayerDied(AActor* DeadPlayer)
+{
+	if (TargetActor.Get() == DeadPlayer || !DeadPlayer)
+	{
+		TargetActor = nullptr;
+		StopMovement();
+		if (ControlledZombie.IsValid())
+		{
+			ControlledZombie->StopAttackAndReset();
+		}
+		SetAIState(EZombieAIState::Wander);
 	}
 }
 

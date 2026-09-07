@@ -79,6 +79,57 @@ void UCombatHUDWidget::NativeConstruct()
 	BindToPlayerSystems();
 }
 
+void UCombatHUDWidget::NativeDestruct()
+{
+	if (CachedPlayer.IsValid())
+	{
+		if (UZombieHealthComponent* HC = CachedPlayer->GetHealthComponent())
+		{
+			HC->OnHealthChanged.RemoveDynamic(this, &UCombatHUDWidget::HandleHealthChanged);
+		}
+
+		if (UCombatComponent* CombatComp = CachedPlayer->GetCombatComponent())
+		{
+			CombatComp->OnAimStateChanged.RemoveDynamic(this, &UCombatHUDWidget::HandleAimStateChanged);
+		}
+
+		if (UInteractionComponent* InterComp = CachedPlayer->FindComponentByClass<UInteractionComponent>())
+		{
+			InterComp->OnInteractableFound.RemoveDynamic(this, &UCombatHUDWidget::HandleInteractableFound);
+			InterComp->OnInteractableLost.RemoveDynamic(this, &UCombatHUDWidget::HandleInteractableLost);
+		}
+
+		if (APlayerStateBase* PS = CachedPlayer->GetPlayerState<APlayerStateBase>())
+		{
+			PS->OnPointsChanged.RemoveDynamic(this, &UCombatHUDWidget::HandlePointsChanged);
+			PS->OnDoublePointsStateChanged.RemoveDynamic(this, &UCombatHUDWidget::HandleDoublePointsChanged);
+		}
+	}
+
+	if (CachedWeapon.IsValid())
+	{
+		CachedWeapon->OnAmmoChanged.RemoveDynamic(this, &UCombatHUDWidget::HandleAmmoChanged);
+		CachedWeapon->OnWeaponHitTarget.RemoveDynamic(this, &UCombatHUDWidget::ShowHitmarker);
+	}
+
+	if (UWorld* World = GetWorld())
+	{
+		if (AZombieGameModeBase* GM = Cast<AZombieGameModeBase>(World->GetAuthGameMode()))
+		{
+			if (AZombieWaveManager* WM = GM->GetWaveManager())
+			{
+				WM->OnWaveStarted.RemoveDynamic(this, &UCombatHUDWidget::HandleWaveStarted);
+				WM->OnWaveStateChanged.RemoveDynamic(this, &UCombatHUDWidget::HandleWaveStateChanged);
+				WM->OnZombiesRemainingChanged.RemoveDynamic(this, &UCombatHUDWidget::HandleZombiesRemainingChanged);
+			}
+
+			GM->OnInstaKillStateChanged.RemoveDynamic(this, &UCombatHUDWidget::HandleInstaKillChanged);
+		}
+	}
+
+	Super::NativeDestruct();
+}
+
 void UCombatHUDWidget::BindToPlayerSystems()
 {
 	APlayerCharacter* Player = Cast<APlayerCharacter>(GetOwningPlayerPawn());
@@ -347,6 +398,12 @@ void UCombatHUDWidget::HandleHealthChanged(float CurrentHealth, float MaxHealth,
 	{
 		const float HealthRatio = CurrentHealth / MaxHealth;
 		TargetDamageOpacity = FMath::Clamp(1.0f - HealthRatio, 0.0f, 1.0f);
+
+		// Instant red flash on taking damage
+		if (HealthDelta < 0.0f)
+		{
+			CurrentDamageOpacity = FMath::Clamp(CurrentDamageOpacity + 0.45f, 0.0f, 1.0f);
+		}
 	}
 }
 
@@ -651,6 +708,17 @@ void UCombatHUDWidget::UpdatePowerUpUIState()
 
 void UCombatHUDWidget::ShowHitmarker(bool bIsHeadshot)
 {
+	// 1. Play 2D audio feedback
+	if (bIsHeadshot && HeadshotHitmarkerSound)
+	{
+		UGameplayStatics::PlaySound2D(this, HeadshotHitmarkerSound);
+	}
+	else if (HitmarkerSound)
+	{
+		UGameplayStatics::PlaySound2D(this, HitmarkerSound);
+	}
+
+	// 2. Visual hitmarker
 	if (!bEnableHitmarkers)
 	{
 		return;

@@ -89,6 +89,22 @@ public:
 	float BobbingAmplitude = 12.0f;
 
 	// ----------------------------------------------------------------------------------
+	// Audio & Spatial Sound
+	// ----------------------------------------------------------------------------------
+
+	/** Spatial attenuation asset for 3D spawn audio. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="PowerUp|Audio")
+	TObjectPtr<class USoundAttenuation> SpatialAttenuation;
+
+	/** Sound played when the power-up spawns into the world. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="PowerUp|Audio")
+	TObjectPtr<class USoundBase> SpawnSound;
+
+	/** Sound / Voice line played when the power-up is picked up. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="PowerUp|Audio")
+	TObjectPtr<class USoundBase> CollectSound;
+
+	// ----------------------------------------------------------------------------------
 	// Observer Events
 	// ----------------------------------------------------------------------------------
 
