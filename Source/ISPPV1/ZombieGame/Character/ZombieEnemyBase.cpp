@@ -12,6 +12,8 @@
 #include "DrawDebugHelpers.h"
 #include "Perception/AISense_Damage.h"
 #include "ZombieGame/Core/PlayerStateBase.h"
+#include "ZombieGame/Character/PlayerCharacter.h"
+#include "ZombieGame/Gameplay/PowerUpBase.h"
 
 AZombieEnemyBase::AZombieEnemyBase()
 {
@@ -115,8 +117,8 @@ float AZombieEnemyBase::TakeZombieDamage_Implementation(const FZombieDamageData&
 
 	const float ActualDamage = Super::TakeZombieDamage_Implementation(DamageData);
 
-	// Award hit points reward directly to the attacking player
-	if (ActualDamage > 0.0f && DamageData.InstigatedBy.IsValid())
+	// Award hit points reward directly to the attacking player only if the target survived the shot and not killed by Nuke
+	if (ActualDamage > 0.0f && IsZombieAlive_Implementation() && DamageData.InstigatedBy.IsValid() && !DamageData.bIsNuke)
 	{
 		if (APlayerStateBase* PS = DamageData.InstigatedBy->GetPlayerState<APlayerStateBase>())
 		{
@@ -196,7 +198,12 @@ void AZombieEnemyBase::HandleDeath(AActor* DeadActor, AActor* KillerActor)
 	{
 		if (APlayerStateBase* PS = KillerController->GetPlayerState<APlayerStateBase>())
 		{
-			if (LastDamageReceived.bIsHeadshot)
+			if (LastDamageReceived.bIsNuke)
+			{
+				// Nuke eliminations award match bonus through GameMode, skipping per-zombie kill rewards
+				PS->RecordKill(false);
+			}
+			else if (LastDamageReceived.bIsHeadshot)
 			{
 				PS->AddPoints(HeadshotPointsReward);
 				PS->RecordKill(true);
@@ -209,10 +216,54 @@ void AZombieEnemyBase::HandleDeath(AActor* DeadActor, AActor* KillerActor)
 		}
 	}
 
-	// 5. Notify observers (Wave manager, sound, score subsystems)
+	// 5. Spawn tactical power-up if drop chance succeeds (Weighted drop table, suppressed on Nuke)
+	if (!LastDamageReceived.bIsNuke && PowerUpDropTable.Num() > 0 && FMath::FRand() <= PowerUpDropChance)
+	{
+		float TotalWeight = 0.0f;
+		for (const FPowerUpDropEntry& Entry : PowerUpDropTable)
+		{
+			if (Entry.PowerUpClass && Entry.Weight > 0.0f)
+			{
+				TotalWeight += Entry.Weight;
+			}
+		}
+
+		if (TotalWeight > 0.0f)
+		{
+			const float RolledWeight = FMath::FRandRange(0.0f, TotalWeight);
+			float AccumulatedWeight = 0.0f;
+			TSubclassOf<APowerUpBase> SelectedPowerUpClass = nullptr;
+
+			for (const FPowerUpDropEntry& Entry : PowerUpDropTable)
+			{
+				if (Entry.PowerUpClass && Entry.Weight > 0.0f)
+				{
+					AccumulatedWeight += Entry.Weight;
+					if (RolledWeight <= AccumulatedWeight)
+					{
+						SelectedPowerUpClass = Entry.PowerUpClass;
+						break;
+					}
+				}
+			}
+
+			if (SelectedPowerUpClass && GetWorld())
+			{
+				FActorSpawnParameters SpawnParams;
+				SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+				const FVector DropLocation = GetActorLocation() + FVector(0.0f, 0.0f, 40.0f);
+				GetWorld()->SpawnActor<APowerUpBase>(SelectedPowerUpClass, DropLocation, FRotator::ZeroRotator, SpawnParams);
+
+				UE_LOG(LogTemp, Log, TEXT("[%s] Dropped power-up '%s' (Rolled weight %0.2f / %0.2f)"),
+					*GetName(), *SelectedPowerUpClass->GetName(), RolledWeight, TotalWeight);
+			}
+		}
+	}
+
+	// 6. Notify observers (Wave manager, sound, score subsystems)
 	OnZombieDeath.Broadcast(this);
 
-	// 6. Schedule corpse destruction to free memory
+	// 7. Schedule corpse destruction to free memory
 	SetLifeSpan(CorpseLifespan);
 }
 
@@ -333,13 +384,14 @@ void AZombieEnemyBase::PerformAttack()
 		AttackAnimDuration = PlayAnimMontage(AttackMontage, NormalizedMontageRate);
 	}
 
-	// Schedule damage delivery mid-swing (e.g. 0.4s into animation)
+	// Schedule damage delivery mid-swing when attack reaches apex
+	const float DamageDelay = AttackAnimDuration * FMath::Clamp(AttackDamageFraction, 0.1f, 0.9f);
 	FTimerHandle DamageTimerHandle;
 	GetWorldTimerManager().SetTimer(
 		DamageTimerHandle,
 		this,
 		&AZombieEnemyBase::ApplyMeleeDamage,
-		FMath::Min(0.45f, AttackAnimDuration * 0.4f),
+		DamageDelay,
 		false
 	);
 
@@ -384,10 +436,10 @@ void AZombieEnemyBase::ApplyMeleeDamage()
 	QueryParams.AddIgnoredActor(this);
 
 	FCollisionShape AttackSphere = FCollisionShape::MakeSphere(AttackRadius);
-	FHitResult HitResult;
+	TArray<FHitResult> HitResults;
 
-	const bool bHit = World->SweepSingleByChannel(
-		HitResult,
+	const bool bHit = World->SweepMultiByChannel(
+		HitResults,
 		TraceStart,
 		TraceEnd,
 		FQuat::Identity,
@@ -396,23 +448,28 @@ void AZombieEnemyBase::ApplyMeleeDamage()
 		QueryParams
 	);
 
-	if (bHit && HitResult.GetActor())
+	if (bHit)
 	{
-		AActor* TargetActor = HitResult.GetActor();
-		if (TargetActor != this && TargetActor->Implements<UZombieDamageableInterface>())
+		for (const FHitResult& Hit : HitResults)
 		{
-			FZombieDamageData DamageData;
-			DamageData.BaseDamage = AttackDamage;
-			DamageData.HitLocation = HitResult.ImpactPoint;
-			DamageData.HitBoneName = HitResult.BoneName;
-			DamageData.HitImpulse = GetActorForwardVector() * 1000.0f;
-			DamageData.DamageCauser = this;
-			DamageData.InstigatedBy = GetController();
-			DamageData.bIsHeadshot = false;
+			AActor* TargetActor = Hit.GetActor();
+			// STRICT FILTER: Zero friendly fire! Only damage APlayerCharacter, never fellow zombies or power-ups!
+			if (TargetActor && TargetActor != this && TargetActor->IsA<APlayerCharacter>() && TargetActor->Implements<UZombieDamageableInterface>())
+			{
+				FZombieDamageData DamageData;
+				DamageData.BaseDamage = AttackDamage;
+				DamageData.HitLocation = Hit.ImpactPoint;
+				DamageData.HitBoneName = Hit.BoneName;
+				DamageData.HitImpulse = GetActorForwardVector() * 1000.0f;
+				DamageData.DamageCauser = this;
+				DamageData.InstigatedBy = GetController();
+				DamageData.bIsHeadshot = false;
 
-			const float DealtDamage = IZombieDamageableInterface::Execute_TakeZombieDamage(TargetActor, DamageData);
-			UE_LOG(LogTemp, Log, TEXT("[%s] Melee hit %s for %f damage!"),
-				*GetName(), *TargetActor->GetName(), DealtDamage);
+				const float DealtDamage = IZombieDamageableInterface::Execute_TakeZombieDamage(TargetActor, DamageData);
+				UE_LOG(LogTemp, Log, TEXT("[%s] Melee hit player %s for %f damage!"),
+					*GetName(), *TargetActor->GetName(), DealtDamage);
+				break; // Deliver damage to player once per swing
+			}
 		}
 	}
 }

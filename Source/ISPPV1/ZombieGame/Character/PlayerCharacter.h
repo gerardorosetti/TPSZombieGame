@@ -11,6 +11,8 @@ class UCameraComponent;
 class UInputMappingContext;
 class UInputAction;
 class UCombatComponent;
+class UInteractionComponent;
+class UCombatHUDWidget;
 struct FInputActionValue;
 
 /**
@@ -58,6 +60,14 @@ protected:
 	TObjectPtr<UCombatComponent> CombatComponent;
 
 	// ----------------------------------------------------------------------------------
+	// Interaction Subsystem
+	// ----------------------------------------------------------------------------------
+
+	/** Interaction component performing forward line-of-sight raycasts for world interactables. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Interaction", meta=(AllowPrivateAccess="true"))
+	TObjectPtr<UInteractionComponent> InteractionComponent;
+
+	// ----------------------------------------------------------------------------------
 	// AI Perception Subsystem
 	// ----------------------------------------------------------------------------------
 
@@ -94,6 +104,14 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Input")
 	TObjectPtr<UInputAction> AimAction;
 
+	/** World interaction input action (Key [E]). */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Input")
+	TObjectPtr<UInputAction> InteractAction;
+
+	/** Combat HUD widget class to instantiate. Can be assigned in BP_PlayerCharacter. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="UI")
+	TSubclassOf<UCombatHUDWidget> HUDWidgetClass;
+
 	// ----------------------------------------------------------------------------------
 	// Input Handlers
 	// ----------------------------------------------------------------------------------
@@ -106,6 +124,7 @@ protected:
 	void ReloadWeapon();
 	void StartAiming();
 	void StopAiming();
+	void Interact();
 
 public:
 	// ----------------------------------------------------------------------------------
@@ -115,4 +134,6 @@ public:
 	FORCEINLINE USpringArmComponent* GetCameraBoom() const { return CameraBoom; }
 	FORCEINLINE UCameraComponent* GetFollowCamera() const { return FollowCamera; }
 	FORCEINLINE UCombatComponent* GetCombatComponent() const { return CombatComponent; }
+	FORCEINLINE UInteractionComponent* GetInteractionComponent() const { return InteractionComponent; }
+	FORCEINLINE TSubclassOf<UCombatHUDWidget> GetHUDWidgetClass() const { return HUDWidgetClass; }
 };

@@ -33,12 +33,6 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnGameOverSignature);
 
 /**
  * Orchestrates wave generation, enemy instantiation, round difficulty scaling, and match lifecycle.
- * 
- * Pedagogical Architecture:
- * - Factory Pattern: Instantiates and initializes enemy actors scaled to the current round.
- * - Observer Pattern: Dispatches round, enemy count, and countdown delegates for decoupled HUD and sound playback.
- * - State Machine: Manages transitions between Waiting, Active Wave, Intermission, and Game Over.
- * - Performance Safeguards: Enforces MaxSimultaneousZombies to protect frame rate on hardware.
  */
 UCLASS()
 class ISPPV1_API AZombieWaveManager : public AActor

@@ -15,6 +15,10 @@
 #include "Perception/AIPerceptionStimuliSourceComponent.h"
 #include "Perception/AISense_Sight.h"
 #include "Perception/AISense_Damage.h"
+#include "ZombieGame/Gameplay/InteractionComponent.h"
+#include "ZombieGame/Character/ZombieHealthComponent.h"
+#include "ZombieGame/Core/ZombieGameModeBase.h"
+#include "ZombieGame/UI/CombatHUDWidget.h"
 
 APlayerCharacter::APlayerCharacter()
 {
@@ -26,7 +30,7 @@ APlayerCharacter::APlayerCharacter()
 	if (UCharacterMovementComponent* MoveComp = GetCharacterMovement())
 	{
 		MoveComp->bOrientRotationToMovement = true;
-		MoveComp->RotationRate = FRotator(0.0f, 500.0f, 0.0f);
+		MoveComp->RotationRate = FRotator(0.0f, 720.0f, 0.0f);
 		MoveComp->JumpZVelocity = 500.0f;
 		MoveComp->AirControl = 0.35f;
 		MoveComp->MaxWalkSpeed = 500.0f;
@@ -59,6 +63,17 @@ APlayerCharacter::APlayerCharacter()
 		StimuliSourceComponent->RegisterForSense(UAISense_Damage::StaticClass());
 		StimuliSourceComponent->bAutoRegister = true;
 	}
+
+	// 6. Instantiate Interaction Component for World Interactables
+	InteractionComponent = CreateDefaultSubobject<UInteractionComponent>(TEXT("InteractionComponent"));
+
+	// 7. Enable Survival Health Auto-Regeneration on Player
+	if (HealthComponent)
+	{
+		HealthComponent->bEnableAutoRegen = true;
+		HealthComponent->RegenDelay = 4.0f;
+		HealthComponent->RegenRate = 50.0f;
+	}
 }
 
 void APlayerCharacter::BeginPlay()
@@ -69,6 +84,35 @@ void APlayerCharacter::BeginPlay()
 	if (StimuliSourceComponent)
 	{
 		StimuliSourceComponent->RegisterWithPerceptionSystem();
+	}
+
+	// Client / Standalone Safeguard: Ensure Combat HUD is active for local player
+	if (IsLocallyControlled())
+	{
+		if (APlayerController* PC = Cast<APlayerController>(GetController()))
+		{
+			bool bHUDAlreadyCreated = false;
+			if (UWorld* World = GetWorld())
+			{
+				if (AZombieGameModeBase* GM = Cast<AZombieGameModeBase>(World->GetAuthGameMode()))
+				{
+					if (GM->GetActiveHUDWidget())
+					{
+						bHUDAlreadyCreated = true;
+					}
+				}
+			}
+
+			if (!bHUDAlreadyCreated && HUDWidgetClass && !HUDWidgetClass->HasAnyClassFlags(CLASS_Abstract))
+			{
+				UCombatHUDWidget* FallbackHUD = CreateWidget<UCombatHUDWidget>(PC, HUDWidgetClass);
+				if (FallbackHUD)
+				{
+					FallbackHUD->AddToViewport(0);
+					UE_LOG(LogTemp, Log, TEXT("[PlayerCharacter] Mounted Combat HUD to viewport."));
+				}
+			}
+		}
 	}
 }
 
@@ -132,6 +176,17 @@ void APlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCom
 			EnhancedInputComponent->BindAction(AimAction, ETriggerEvent::Started, this, &APlayerCharacter::StartAiming);
 			EnhancedInputComponent->BindAction(AimAction, ETriggerEvent::Completed, this, &APlayerCharacter::StopAiming);
 		}
+
+		if (InteractAction)
+		{
+			EnhancedInputComponent->BindAction(InteractAction, ETriggerEvent::Started, this, &APlayerCharacter::Interact);
+		}
+	}
+
+	// Fallback direct key binding for [E] ensuring out-of-the-box interaction without requiring IMC editing
+	if (PlayerInputComponent)
+	{
+		PlayerInputComponent->BindKey(EKeys::E, IE_Pressed, this, &APlayerCharacter::Interact);
 	}
 }
 
@@ -221,3 +276,12 @@ void APlayerCharacter::StopAiming()
 		CombatComponent->SetAiming(false);
 	}
 }
+
+void APlayerCharacter::Interact()
+{
+	if (InteractionComponent)
+	{
+		InteractionComponent->TryInteract();
+	}
+}
+

@@ -9,21 +9,13 @@
 #include "Kismet/GameplayStatics.h"
 #include "NavigationSystem.h"
 #include "Components/CapsuleComponent.h"
-#include "UObject/ConstructorHelpers.h"
 
 AZombieWaveManager::AZombieWaveManager()
 {
 	PrimaryActorTick.bCanEverTick = false;
 
-	// Default to C++ ZombieEnemyBase, attempt to bind BP_Zombie_Nurse if available
+	// Default to C++ ZombieEnemyBase. Designer assigns BP_Zombie_Nurse in details panel or Blueprint
 	ZombieClass = AZombieEnemyBase::StaticClass();
-	static ConstructorHelpers::FClassFinder<AZombieEnemyBase> ZombieBP(
-		TEXT("/Game/ZombieGame/Blueprints/Characters/Enemies/BP_Zombie_Nurse")
-	);
-	if (ZombieBP.Succeeded() && ZombieBP.Class)
-	{
-		ZombieClass = ZombieBP.Class;
-	}
 
 	BaseZombiesPerWave = 6;
 	ZombiesPerWaveMultiplier = 4.0f;
@@ -181,10 +173,19 @@ void AZombieWaveManager::SpawnSingleZombie()
 	{
 		ChosenSpawnPoint->GetValidSpawnLocation(SpawnLocation);
 		SpawnRotation = FRotator(0.0f, ChosenSpawnPoint->GetActorRotation().Yaw, 0.0f);
+		UE_LOG(LogTemp, Verbose, TEXT("[ZombieWaveManager] Spawning zombie from Spawner '%s' (Zone: '%s') at %s"),
+			*ChosenSpawnPoint->GetName(), *ChosenSpawnPoint->GetZoneName().ToString(), *SpawnLocation.ToString());
 	}
 	else
 	{
-		// Intelligent Fallback: Query NavMesh around the player at a safe distance (900-1500 cm)
+		// If spawners exist in level but none are currently active (e.g. all behind locked doors), do NOT spawn in random rooms!
+		if (SpawnPoints.Num() > 0)
+		{
+			UE_LOG(LogTemp, Verbose, TEXT("[ZombieWaveManager] Waiting to spawn: %d spawners placed, but none active in unlocked zones."), SpawnPoints.Num());
+			return;
+		}
+
+		// Intelligent Fallback ONLY IF the designer placed zero spawners in the entire level:
 		APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(this, 0);
 		UNavigationSystemV1* NavSys = FNavigationSystem::GetCurrent<UNavigationSystemV1>(GetWorld());
 		if (PlayerPawn && NavSys)
@@ -237,7 +238,7 @@ void AZombieWaveManager::SpawnSingleZombie()
 	FCollisionQueryParams FloorQueryParams(SCENE_QUERY_STAT(ZombieSpawnFloorTrace), false);
 	FloorQueryParams.bTraceComplex = true;
 	const FVector TraceStart = SpawnLocation + FVector(0.0f, 0.0f, 250.0f);
-	const FVector TraceEnd = SpawnLocation - FVector(0.0f, 0.0f, 250.0f);
+	const FVector TraceEnd = SpawnLocation - FVector(0.0f, 0.0f, 500.0f);
 
 	if (World->LineTraceSingleByChannel(FloorHit, TraceStart, TraceEnd, ECC_WorldStatic, FloorQueryParams))
 	{
@@ -361,6 +362,22 @@ void AZombieWaveManager::RegisterSpawnPoint(AZombieSpawnPoint* NewSpawnPoint)
 TArray<AZombieSpawnPoint*> AZombieWaveManager::GetActiveSpawnPoints() const
 {
 	TArray<AZombieSpawnPoint*> Active;
+
+	// In case spawners streamed in late with World Partition or spawned after WaveManager:
+	if (SpawnPoints.Num() == 0)
+	{
+		if (UWorld* World = GetWorld())
+		{
+			for (TActorIterator<AZombieSpawnPoint> It(World); It; ++It)
+			{
+				if (IsValid(*It) && !SpawnPoints.Contains(*It))
+				{
+					const_cast<AZombieWaveManager*>(this)->SpawnPoints.Add(*It);
+				}
+			}
+		}
+	}
+
 	for (AZombieSpawnPoint* SP : SpawnPoints)
 	{
 		if (IsValid(SP) && SP->IsSpawnPointActive())

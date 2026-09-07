@@ -10,12 +10,7 @@ class UBillboardComponent;
 class UArrowComponent;
 
 /**
- * Designated spawn point actor for zombie enemy generation.
- * 
- * Pedagogical Architecture:
- * - Level designers place these in rooms, windows, or behind barriers.
- * - Supports Zone tagging to enable spawners only when specific doors/areas are unlocked.
- * - Validates NavMesh projection to ensure spawned zombies are placed safely on walkable surfaces.
+ * Designated spawn point actor for enemy generation, with zone tagging and NavMesh projection validation.
  */
 UCLASS()
 class ISPPV1_API AZombieSpawnPoint : public AActor
@@ -26,6 +21,8 @@ public:
 	AZombieSpawnPoint();
 
 protected:
+	virtual void BeginPlay() override;
+
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Components")
 	TObjectPtr<USceneComponent> SceneRoot;
 
@@ -37,17 +34,23 @@ protected:
 	TObjectPtr<UArrowComponent> DirectionArrow;
 #endif
 
-	/** If false, the wave manager will not select this spawn point (e.g. area locked by door). */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Zombie|Spawn")
-	bool bIsActive = true;
+	/** If true, this spawner begins dormant (inactive) until its Zone is unlocked by an ObstacleDoor.
+	 * If false and ZoneName is None, it is active immediately from Round 1. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Zombie|Spawn", meta=(DisplayName="Is Dormant"))
+	bool bIsDormant = false;
 
-	/** Optional zone name identifier (e.g. "StartingRoom", "Courtyard") unlocked by doors. */
+	/** Optional zone name identifier (e.g. "StartingRoom", "GreenBlock") unlocked by doors.
+	 * Leave None or empty for the starting room. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Zombie|Spawn")
 	FName ZoneName = NAME_None;
 
 	/** Radius in cm around this actor to project onto the NavMesh. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Zombie|Spawn", meta=(ClampMin="50.0", ClampMax="500.0"))
-	float SpawnRadius = 100.0f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Zombie|Spawn", meta=(ClampMin="50.0", ClampMax="1000.0"))
+	float SpawnRadius = 200.0f;
+
+	/** Runtime active state. True when WaveManager can spawn zombies from this location. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Zombie|Spawn")
+	bool bIsActive = true;
 
 public:
 	/**
@@ -67,4 +70,7 @@ public:
 
 	UFUNCTION(BlueprintPure, Category="Zombie|Spawn")
 	FName GetZoneName() const { return ZoneName; }
+
+	UFUNCTION(BlueprintPure, Category="Zombie|Spawn")
+	bool MatchesZone(const FName& InZone) const;
 };

@@ -1,11 +1,13 @@
-﻿// Copyright (c) 2026 Academic Game Architecture. All Rights Reserved.
+// Copyright (c) 2026 Academic Game Architecture. All Rights Reserved.
 
 #include "ZombieGame/Combat/CombatComponent.h"
 #include "ZombieGame/Combat/WeaponBase.h"
 #include "GameFramework/Character.h"
+#include "GameFramework/CharacterMovementComponent.h"
 #include "Camera/CameraComponent.h"
 #include "GameFramework/SpringArmComponent.h"
 #include "Engine/World.h"
+#include "TimerManager.h"
 
 UCombatComponent::UCombatComponent()
 {
@@ -55,6 +57,34 @@ void UCombatComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActo
 
 void UCombatComponent::StartFire()
 {
+	ActivateCombatStance();
+
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(CombatStanceTimerHandle);
+		World->GetTimerManager().ClearTimer(InitialFireDelayTimerHandle);
+	}
+
+	ACharacter* Char = Cast<ACharacter>(GetOwner());
+	if (Char)
+	{
+		const float YawDiff = FMath::Abs(FRotator::NormalizeAxis(Char->GetControlRotation().Yaw - Char->GetActorRotation().Yaw));
+		// If character is facing significantly away from camera (> 25 degrees), wait a brief moment for rotation to align and weapon to raise
+		if (YawDiff > 25.0f && !bIsAiming)
+		{
+			if (UWorld* World = GetWorld())
+			{
+				World->GetTimerManager().SetTimer(InitialFireDelayTimerHandle, this, &UCombatComponent::ExecuteDelayedFire, 0.12f, false);
+				return;
+			}
+		}
+	}
+
+	ExecuteDelayedFire();
+}
+
+void UCombatComponent::ExecuteDelayedFire()
+{
 	if (CurrentWeapon)
 	{
 		CurrentWeapon->StartFire();
@@ -63,9 +93,20 @@ void UCombatComponent::StartFire()
 
 void UCombatComponent::StopFire()
 {
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(InitialFireDelayTimerHandle);
+	}
+
 	if (CurrentWeapon)
 	{
 		CurrentWeapon->StopFire();
+	}
+
+	// Schedule transition out of combat stance after duration
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().SetTimer(CombatStanceTimerHandle, this, &UCombatComponent::DeactivateCombatStance, CombatStanceDuration, false);
 	}
 }
 
@@ -82,7 +123,71 @@ void UCombatComponent::SetAiming(bool bNewAiming)
 	if (bIsAiming != bNewAiming)
 	{
 		bIsAiming = bNewAiming;
+
+		if (CurrentWeapon)
+		{
+			CurrentWeapon->SetAiming(bIsAiming);
+		}
+
+		if (bIsAiming)
+		{
+			ActivateCombatStance();
+			if (UWorld* World = GetWorld())
+			{
+				World->GetTimerManager().ClearTimer(CombatStanceTimerHandle);
+			}
+		}
+		else
+		{
+			// Stopped aiming: if not firing, schedule returning to relaxed stance
+			if (!CurrentWeapon || !CurrentWeapon->IsFiring())
+			{
+				if (UWorld* World = GetWorld())
+				{
+					World->GetTimerManager().SetTimer(CombatStanceTimerHandle, this, &UCombatComponent::DeactivateCombatStance, 0.2f, false);
+				}
+			}
+		}
+
 		OnAimStateChanged.Broadcast(bIsAiming);
+	}
+}
+
+void UCombatComponent::ActivateCombatStance()
+{
+	bWeaponRaised = true;
+
+	if (ACharacter* Char = Cast<ACharacter>(GetOwner()))
+	{
+		if (UCharacterMovementComponent* MoveComp = Char->GetCharacterMovement())
+		{
+			MoveComp->bUseControllerDesiredRotation = true;
+			MoveComp->bOrientRotationToMovement = false;
+		}
+	}
+}
+
+void UCombatComponent::DeactivateCombatStance()
+{
+	if (bIsAiming)
+	{
+		return;
+	}
+
+	if (CurrentWeapon && CurrentWeapon->IsFiring())
+	{
+		return;
+	}
+
+	bWeaponRaised = false;
+
+	if (ACharacter* Char = Cast<ACharacter>(GetOwner()))
+	{
+		if (UCharacterMovementComponent* MoveComp = Char->GetCharacterMovement())
+		{
+			MoveComp->bUseControllerDesiredRotation = false;
+			MoveComp->bOrientRotationToMovement = true;
+		}
 	}
 }
 
@@ -113,9 +218,18 @@ void UCombatComponent::EquipWeapon(TSubclassOf<AWeaponBase> NewWeaponClass)
 		if (ACharacter* OwnerCharacter = Cast<ACharacter>(GetOwner()))
 		{
 			CurrentWeapon->AttachToCharacter(OwnerCharacter, WeaponAttachSocket);
+			CurrentWeapon->SetAiming(bIsAiming);
 			UE_LOG(LogTemp, Log, TEXT("[CombatComponent] Successfully equipped and attached weapon: %s to socket: %s"),
 				*CurrentWeapon->GetName(), *WeaponAttachSocket.ToString());
 		}
+	}
+}
+
+void UCombatComponent::RefillAllWeaponsAmmo()
+{
+	if (CurrentWeapon)
+	{
+		CurrentWeapon->RefillAmmo(true, true);
 	}
 }
 

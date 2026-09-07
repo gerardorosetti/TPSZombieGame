@@ -8,6 +8,7 @@
 #include "Navigation/PathFollowingComponent.h"
 #include "NavigationSystem.h"
 #include "GameFramework/Character.h"
+#include "ZombieGame/Character/PlayerCharacter.h"
 #include "TimerManager.h"
 #include "Kismet/GameplayStatics.h"
 
@@ -57,8 +58,16 @@ void AZombieAIController::OnPossess(APawn* InPawn)
 		AIPerceptionComponent->OnTargetPerceptionUpdated.AddDynamic(this, &AZombieAIController::HandleTargetPerceptionUpdated);
 	}
 
-	// Start in wandering state
-	SetAIState(EZombieAIState::Wander);
+	// In zombie survival, spawned zombies immediately pursue the player
+	if (APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(this, 0))
+	{
+		TargetActor = PlayerPawn;
+		SetAIState(EZombieAIState::Chase);
+	}
+	else
+	{
+		SetAIState(EZombieAIState::Wander);
+	}
 }
 
 void AZombieAIController::OnUnPossess()
@@ -76,6 +85,8 @@ void AZombieAIController::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
 
+	TimeSinceLastRepath += DeltaTime;
+
 	if (!ControlledZombie.IsValid())
 	{
 		return;
@@ -91,17 +102,13 @@ void AZombieAIController::Tick(float DeltaTime)
 		return;
 	}
 
-	// Proximity aggro fail-safe: if the player gets within proximity threshold, immediately aggro and chase
-	if (CurrentState == EZombieAIState::Wander || CurrentState == EZombieAIState::Idle)
+	// Continuous hunt safeguard: ensure zombie is always chasing the living player
+	if (!TargetActor.IsValid() || CurrentState == EZombieAIState::Wander || CurrentState == EZombieAIState::Idle)
 	{
 		if (APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(this, 0))
 		{
-			const float DistToPlayer2D = FVector::Dist2D(ControlledZombie->GetActorLocation(), PlayerPawn->GetActorLocation());
-			if (DistToPlayer2D <= ProximityAggroRadius)
-			{
-				TargetActor = PlayerPawn;
-				SetAIState(EZombieAIState::Chase);
-			}
+			TargetActor = PlayerPawn;
+			SetAIState(EZombieAIState::Chase);
 		}
 	}
 
@@ -129,29 +136,11 @@ void AZombieAIController::HandleTargetPerceptionUpdated(AActor* Actor, FAIStimul
 		return;
 	}
 
-	// Do not target self or dead actors
-	if (Actor == GetPawn() || !Actor)
+	// Strictly target living player characters! Never target other zombies or world items
+	if (Actor && Actor != GetPawn() && Actor->IsA<APlayerCharacter>())
 	{
-		return;
-	}
-
-	// Only target player characters
-	if (ACharacter* TargetCharacter = Cast<ACharacter>(Actor))
-	{
-		if (TargetCharacter->IsPlayerControlled())
-		{
-			if (Stimulus.WasSuccessfullySensed())
-			{
-				TargetActor = Actor;
-				SetAIState(EZombieAIState::Chase);
-				UE_LOG(LogTemp, Log, TEXT("[%s] Perceived player! Starting chase."), *GetName());
-			}
-			else if (TargetActor == Actor && !Stimulus.WasSuccessfullySensed())
-			{
-				// Target lost line of sight: return to wander
-				SetAIState(EZombieAIState::Wander);
-			}
-		}
+		TargetActor = Actor;
+		SetAIState(EZombieAIState::Chase);
 	}
 }
 
@@ -174,7 +163,9 @@ void AZombieAIController::SetAIState(EZombieAIState NewState)
 		GetWorldTimerManager().ClearTimer(WanderTimerHandle);
 		if (TargetActor.IsValid())
 		{
-			MoveToActor(TargetActor.Get(), AcceptanceRadius, true, true, true);
+			LastTargetLocation = TargetActor->GetActorLocation();
+			TimeSinceLastRepath = 0.0f;
+			MoveToActor(TargetActor.Get(), AcceptanceRadius, true, true, true, nullptr, true);
 		}
 		break;
 
@@ -209,7 +200,20 @@ void AZombieAIController::UpdateChaseLogic()
 		return;
 	}
 
-	const float Distance2D = FVector::Dist2D(ControlledZombie->GetActorLocation(), TargetActor->GetActorLocation());
+	const FVector TargetLoc = TargetActor->GetActorLocation();
+	const FVector MyLoc = ControlledZombie->GetActorLocation();
+	const float Distance2D = FVector::Dist2D(MyLoc, TargetLoc);
+
+	// Always smoothly rotate toward the target player even while pathfinding or temporarily obstructed
+	FVector DirToTarget = TargetLoc - MyLoc;
+	DirToTarget.Z = 0.0f;
+	if (!DirToTarget.IsNearlyZero())
+	{
+		const FRotator CurrentRot = ControlledZombie->GetActorRotation();
+		const FRotator TargetRot = DirToTarget.Rotation();
+		const float DeltaTime = GetWorld() ? GetWorld()->GetDeltaSeconds() : 0.016f;
+		ControlledZombie->SetActorRotation(FMath::RInterpTo(CurrentRot, TargetRot, DeltaTime, 6.0f));
+	}
 
 	// If within melee strike distance, switch immediately to attack state and strike
 	if (Distance2D <= ControlledZombie->GetAttackRange())
@@ -222,8 +226,28 @@ void AZombieAIController::UpdateChaseLogic()
 		return;
 	}
 
-	// Steer toward the player along NavMesh
-	MoveToActor(TargetActor.Get(), AcceptanceRadius, true, true, true);
+	// Intelligent rate-limited repath:
+	// Only request MoveToActor if not currently moving OR if time interval elapsed and player moved significantly (>80 cm)
+	const bool bNotMoving = (GetMoveStatus() != EPathFollowingStatus::Moving);
+	const bool bTargetMoved = (FVector::DistSquared(LastTargetLocation, TargetLoc) > 6400.0f); // 80cm
+	const bool bTimeElapsed = (TimeSinceLastRepath >= RepathInterval);
+
+	if (bNotMoving || (bTimeElapsed && bTargetMoved))
+	{
+		TimeSinceLastRepath = 0.0f;
+		LastTargetLocation = TargetLoc;
+		MoveToActor(TargetActor.Get(), AcceptanceRadius, true, true, true, nullptr, true);
+	}
+}
+
+void AZombieAIController::ForceRepath()
+{
+	TimeSinceLastRepath = RepathInterval;
+	if (TargetActor.IsValid() && ControlledZombie.IsValid() && ControlledZombie->IsZombieAlive_Implementation())
+	{
+		LastTargetLocation = TargetActor->GetActorLocation();
+		MoveToActor(TargetActor.Get(), AcceptanceRadius, true, true, true, nullptr, true);
+	}
 }
 
 void AZombieAIController::UpdateAttackLogic()
@@ -276,11 +300,15 @@ void AZombieAIController::NotifyDamageReceived(AActor* Attacker)
 		return;
 	}
 
+	// Zero friendly fire aggro: only aggro on player characters
 	if (Attacker && Attacker != GetPawn())
 	{
-		TargetActor = Attacker;
-		SetAIState(EZombieAIState::Chase);
-		UE_LOG(LogTemp, Log, TEXT("[%s] Aggroed by damage from %s!"), *GetName(), *Attacker->GetName());
+		if (Attacker->IsA<APlayerCharacter>() || (Cast<APawn>(Attacker) && Cast<APawn>(Attacker)->IsPlayerControlled()))
+		{
+			TargetActor = Attacker;
+			SetAIState(EZombieAIState::Chase);
+			UE_LOG(LogTemp, Log, TEXT("[%s] Aggroed by damage from player %s!"), *GetName(), *Attacker->GetName());
+		}
 	}
 }
 

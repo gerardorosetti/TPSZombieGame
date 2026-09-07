@@ -35,7 +35,7 @@ void ABaseCharacter::BeginPlay()
 
 void ABaseCharacter::HandleHealthChanged(float CurrentHealth, float MaxHealth, float HealthDelta, const FZombieDamageData& DamageData)
 {
-	// Log for instructor and student debugging
+	// Verbose logging for gameplay inspection
 	UE_LOG(LogTemp, Verbose, TEXT("[%s] Health Changed: %f/%f (Delta: %f)"),
 		*GetName(), CurrentHealth, MaxHealth, HealthDelta);
 }

@@ -1,6 +1,8 @@
 // Copyright (c) 2026 Academic Game Architecture. All Rights Reserved.
 
 #include "ZombieGame/Core/PlayerStateBase.h"
+#include "TimerManager.h"
+#include "Engine/World.h"
 
 APlayerStateBase::APlayerStateBase()
 {
@@ -9,6 +11,7 @@ APlayerStateBase::APlayerStateBase()
 	TotalKills = 0;
 	TotalHeadshots = 0;
 	RoundsSurvived = 0;
+	bIsDoublePointsActive = false;
 }
 
 void APlayerStateBase::AddPoints(int32 Amount)
@@ -18,11 +21,65 @@ void APlayerStateBase::AddPoints(int32 Amount)
 		return;
 	}
 
+	if (bIsDoublePointsActive)
+	{
+		Amount *= 2;
+	}
+
 	CurrentPoints += Amount;
 	TotalScoreEarned += Amount;
 
 	OnPointsChanged.Broadcast(CurrentPoints, Amount);
-	UE_LOG(LogTemp, Verbose, TEXT("[%s] +%d Points (Total: %d)"), *GetName(), Amount, CurrentPoints);
+	UE_LOG(LogTemp, Verbose, TEXT("[%s] +%d Points (Total: %d, DoublePoints=%s)"),
+		*GetName(), Amount, CurrentPoints, bIsDoublePointsActive ? TEXT("TRUE") : TEXT("FALSE"));
+}
+
+void APlayerStateBase::ActivateDoublePoints(float Duration)
+{
+	bIsDoublePointsActive = true;
+	DoublePointsDuration = Duration;
+
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(DoublePointsTimerHandle);
+		World->GetTimerManager().SetTimer(
+			DoublePointsTimerHandle,
+			this,
+			&APlayerStateBase::DeactivateDoublePoints,
+			Duration,
+			false
+		);
+	}
+
+	OnDoublePointsStateChanged.Broadcast(true, Duration);
+	UE_LOG(LogTemp, Log, TEXT("[%s] Double Points activated/reset for %f seconds!"), *GetName(), Duration);
+}
+
+void APlayerStateBase::DeactivateDoublePoints()
+{
+	bIsDoublePointsActive = false;
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(DoublePointsTimerHandle);
+	}
+
+	OnDoublePointsStateChanged.Broadcast(false, 0.0f);
+	UE_LOG(LogTemp, Log, TEXT("[%s] Double Points expired."), *GetName());
+}
+
+float APlayerStateBase::GetDoublePointsTimeRemaining() const
+{
+	if (!bIsDoublePointsActive)
+	{
+		return 0.0f;
+	}
+
+	if (const UWorld* World = GetWorld())
+	{
+		return World->GetTimerManager().GetTimerRemaining(DoublePointsTimerHandle);
+	}
+
+	return 0.0f;
 }
 
 bool APlayerStateBase::SpendPoints(int32 Amount)

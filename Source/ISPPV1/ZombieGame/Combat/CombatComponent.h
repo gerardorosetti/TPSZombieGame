@@ -1,4 +1,4 @@
-﻿// Copyright (c) 2026 Academic Game Architecture. All Rights Reserved.
+// Copyright (c) 2026 Academic Game Architecture. All Rights Reserved.
 
 #pragma once
 
@@ -102,12 +102,38 @@ public:
 	UFUNCTION(BlueprintCallable, Category="Combat|Weapons")
 	void EquipWeapon(TSubclassOf<AWeaponBase> NewWeaponClass);
 
+	/** Restores ammunition in all owned weapons to maximum capacity (Max Ammo buff). */
+	UFUNCTION(BlueprintCallable, Category="Combat|Weapons")
+	void RefillAllWeaponsAmmo();
+
+	// ----------------------------------------------------------------------------------
+	// Hipfire / Weapon Raised Stance
+	// ----------------------------------------------------------------------------------
+
+	/** True if character has weapon raised in combat-ready posture (aiming or recently fired). */
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category="Combat|State")
+	bool bWeaponRaised = false;
+
+	/** Duration in seconds character holds weapon raised after firing before returning to relaxed pose. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Combat|Stance", meta=(ClampMin="0.2", ClampMax="5.0"))
+	float CombatStanceDuration = 1.2f;
+
+	FTimerHandle CombatStanceTimerHandle;
+	FTimerHandle InitialFireDelayTimerHandle;
+
+	void ActivateCombatStance();
+	void DeactivateCombatStance();
+	void ExecuteDelayedFire();
+
 	// ----------------------------------------------------------------------------------
 	// Getters
 	// ----------------------------------------------------------------------------------
 
 	UFUNCTION(BlueprintPure, Category="Combat|State")
 	FORCEINLINE bool IsAiming() const { return bIsAiming; }
+
+	UFUNCTION(BlueprintPure, Category="Combat|State")
+	FORCEINLINE bool IsWeaponRaised() const { return bWeaponRaised || bIsAiming; }
 
 	UFUNCTION(BlueprintPure, Category="Combat|Weapons")
 	FORCEINLINE AWeaponBase* GetCurrentWeapon() const { return CurrentWeapon; }

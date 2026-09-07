@@ -43,6 +43,10 @@ struct FZombieDamageData
 	/** Controller responsible for instigating the damage (e.g. Player Controller). */
 	UPROPERTY(BlueprintReadWrite, Category="Damage")
 	TWeakObjectPtr<AController> InstigatedBy = nullptr;
+
+	/** If true, damage originates from a tactical Nuke, suppressing individual kill points and power-up drops. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Damage")
+	bool bIsNuke = false;
 };
 
 /**
@@ -56,12 +60,7 @@ class UZombieDamageableInterface : public UInterface
 };
 
 /**
- * Core interface for any entity in the game capable of taking damage or healing.
- * 
- * Pedagogical Rationale:
- * Demonstrates the Interface Segregation Principle (ISP) and Dependency Inversion Principle (DIP).
- * Combat systems, projectiles, and traps do not need to know concrete classes (e.g. APlayer vs AZombie vs ABarrel).
- * They only depend on this abstraction.
+ * Interface for entities capable of receiving damage or healing.
  */
 class ISPPV1_API IZombieDamageableInterface
 {
